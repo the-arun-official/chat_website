@@ -1,0 +1,268 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ChatType {
+  PRIVATE
+  GROUP
+  CHANNEL
+}
+
+enum ParticipantRole {
+  ADMIN
+  MEMBER
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  FILE
+  SYSTEM
+}
+
+enum ReceiptStatus {
+  SENT
+  DELIVERED
+  READ
+}
+
+enum UserStatus {
+  ONLINE
+  OFFLINE
+  AWAY
+}
+
+model User {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  passwordHash   String
+  username       String    @unique
+  fullName       String?
+  avatarUrl      String?
+  fcmToken       String?
+  isVerified     Boolean   @default(false)
+  isBot          Boolean   @default(false)
+  status         UserStatus @default(OFFLINE)
+  lastSeen       DateTime?
+  preferredLanguage String   @default("en")
+  knownLanguages    String[] @default(["en"])
+  autoTranslate     Boolean  @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Relationships
+  refreshTokens  RefreshToken[]
+  chatParticipants ChatParticipant[]
+  sentMessages     Message[]
+  messageReceipts  MessageStatus[]
+  notifications    Notification[]
+  groupsCreated    Group[]
+  savedMessages    SavedMessage[]
+  reactions        Reaction[]
+  contacts         Contact[] @relation("UserContacts")
+  contactedBy      Contact[] @relation("ContactUsers")
+  blockedUsers     BlockedUser[] @relation("Blocker")
+  blockedBy        BlockedUser[] @relation("Blocked")
+  reportsSubmitted Report[] @relation("Reporter")
+  reportsReceived  Report[] @relation("ReportedUser")
+
+  @@index([email])
+  @@index([username])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+}
+
+model Chat {
+  id           String     @id @default(uuid())
+  type         ChatType   @default(PRIVATE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  // Relationships
+  participants ChatParticipant[]
+  messages     Message[]
+  groupDetails Group?
+
+  @@index([type])
+}
+
+model Group {
+  id          String   @id @default(uuid())
+  chatId      String   @unique
+  chat        Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  avatarUrl   String?
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([chatId])
+}
+
+model ChatParticipant {
+  id        String          @id @default(uuid())
+  chatId    String
+  chat      Chat            @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      ParticipantRole @default(MEMBER)
+  isPinned  Boolean         @default(false)
+  isArchived Boolean        @default(false)
+  isMuted   Boolean         @default(false)
+  unreadCount Int           @default(0)
+  hasAccepted Boolean       @default(true)
+  hiddenAt  DateTime?
+  joinedAt  DateTime        @default(now())
+
+  @@unique([chatId, userId])
+  @@index([userId])
+  @@index([chatId])
+}
+
+model Message {
+  id              String      @id @default(uuid())
+  chatId          String
+  chat            Chat        @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  senderId        String
+  sender          User        @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  type            MessageType @default(TEXT)
+  content         String?     // Nullable because a message could just be an attachment
+  parentMessageId String?
+  parentMessage   Message?    @relation("ReplyTo", fields: [parentMessageId], references: [id], onDelete: SetNull)
+  replies         Message[]   @relation("ReplyTo")
+  isDeleted       Boolean     @default(false)
+  isEdited        Boolean     @default(false)
+  detectedLanguage String?
+  translations     Json?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relationships
+  statuses        MessageStatus[]
+  attachments     Attachment[]
+  savedBy         SavedMessage[]
+  reactions       Reaction[]
+
+  @@index([chatId, createdAt])
+  @@index([senderId])
+}
+
+model MessageStatus {
+  id        String        @id @default(uuid())
+  messageId String
+  message   Message       @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status    ReceiptStatus @default(SENT)
+  timestamp DateTime      @default(now())
+
+  @@unique([messageId, userId])
+  @@index([userId])
+  @@index([messageId])
+}
+
+model Reaction {
+  id        String   @id @default(uuid())
+  emoji     String
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId, emoji]) // A user can't add the same emoji twice to a message
+  @@index([messageId])
+}
+
+model Attachment {
+  id        String   @id @default(uuid())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  fileUrl   String
+  fileType  String   // e.g., 'image/png', 'video/mp4'
+  fileSize  Int      // Size in bytes
+  createdAt DateTime @default(now())
+
+  @@index([messageId])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   // e.g., 'NEW_MESSAGE', 'GROUP_INVITE'
+  title     String
+  body      String
+  data      Json?    // Stores extra payload (like chatId, messageId)
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+}
+
+// ── V2 FEATURE EXTENSIONS ──
+
+model SavedMessage {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, messageId])
+}
+
+model Contact {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation("UserContacts", fields: [userId], references: [id], onDelete: Cascade)
+  contactId String
+  contact   User     @relation("ContactUsers", fields: [contactId], references: [id], onDelete: Cascade)
+  alias     String?  // Optional nickname for the contact
+  createdAt DateTime @default(now())
+
+  @@unique([userId, contactId])
+}
+
+model BlockedUser {
+  id        String   @id @default(uuid())
+  blockerId String
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedId String
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+}
+
+model Report {
+  id           String   @id @default(uuid())
+  reporterId   String
+  reporter     User     @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedId   String?  // Nullable if reporting a group instead of user
+  reportedUser User?    @relation("ReportedUser", fields: [reportedId], references: [id], onDelete: SetNull)
+  chatId       String?  // The context chat where report occurred
+  reason       String
+  status       String   @default("PENDING") // PENDING, REVIEWED, RESOLVED
+  createdAt    DateTime @default(now())
+}
+

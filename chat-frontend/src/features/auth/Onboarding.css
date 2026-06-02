@@ -1,0 +1,415 @@
+/* ====================================================
+   Onboarding Flow - Premium SaaS Split-Pane
+   ==================================================== */
+
+.onboarding-split-root {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  background-color: var(--bg-chat);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  overflow: hidden;
+}
+
+/* --- Left Pane (Info / Brand) --- */
+.split-left {
+  flex: 0 0 45%;
+  background: #000000;
+  color: #ffffff;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 60px;
+  overflow: hidden;
+}
+
+.split-left-bg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 150%;
+  height: 150%;
+  background: radial-gradient(circle at 30% 30%, rgba(79, 70, 229, 0.25) 0%, transparent 40%),
+    radial-gradient(circle at 70% 70%, rgba(124, 58, 237, 0.2) 0%, transparent 40%);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.8;
+}
+
+.split-left-grain {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+}
+
+.split-left-content {
+  position: relative;
+  z-index: 10;
+  max-width: 480px;
+}
+
+.split-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 400;
+  margin-bottom: 80px;
+  color: #fff;
+}
+
+.split-logo-mark {
+  width: 24px;
+  height: 24px;
+  background: #ffffff;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.split-logo-mark svg {
+  width: 12px;
+  height: 12px;
+  fill: #000;
+}
+
+.split-title {
+  font-size: clamp(32px, 3.5vw, 48px);
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+  margin-bottom: 24px;
+}
+
+.split-title span {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.split-subtitle {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 40px;
+}
+
+.split-feats {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.split-feat {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.split-feat svg {
+  color: #4f46e5;
+  width: 16px;
+  height: 16px;
+}
+
+/* --- Right Pane (Forms) --- */
+.split-right {
+  flex: 1;
+  background: var(--bg-chat);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.split-back {
+  position: absolute;
+  top: 32px;
+  left: 32px;
+  background: transparent;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: background 0.2s;
+  z-index: 50;
+}
+
+.split-back:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+}
+
+.step-motion-wrap {
+  width: 100%;
+  max-width: 380px;
+  padding: 24px;
+}
+
+/* --- Form Elements (Small & Light) --- */
+.step-title {
+  font-size: 24px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.step-subtitle {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-bottom: 32px;
+}
+
+.input-group {
+  margin-bottom: 20px;
+}
+
+.step-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-icon {
+  position: absolute;
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  color: #999999;
+  pointer-events: none;
+}
+
+.split-input {
+  width: 100%;
+  height: 44px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 16px 0 36px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-primary);
+  transition: border-color 0.2s, box-shadow 0.2s;
+  outline: none;
+}
+
+.split-input::placeholder {
+  color: #b3b3b3;
+}
+
+.split-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(108, 99, 255, 0.2);
+}
+
+.split-input.error {
+  border-color: #ef4444;
+}
+
+.input-toggle {
+  position: absolute;
+  right: 12px;
+  color: #999999;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.field-error {
+  display: block;
+  font-size: 11px;
+  color: #ef4444;
+  margin-top: 6px;
+  font-weight: 300;
+}
+
+/* Submit Button */
+.btn-primary {
+  width: 100%;
+  height: 44px;
+  background: var(--surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: transform 0.2s, opacity 0.2s;
+}
+
+.btn-primary:hover {
+  opacity: 0.9;
+}
+
+.btn-primary:active {
+  transform: scale(0.98);
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: #666666;
+  font-size: 12px;
+  font-weight: 300;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.btn-link:hover {
+  color: var(--text-primary);
+}
+
+.btn-ghost {
+  width: 100%;
+  height: 33px;
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background 0.2s, transform 0.2s;
+}
+
+.btn-ghost:hover {
+  background: var(--surface);
+}
+
+.btn-ghost:active {
+  transform: scale(0.98);
+}
+
+/* Avatar Upload area */
+.avatar-upload-area {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.avatar-ring {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 1px dashed #cccccc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  overflow: hidden;
+  background: #f9f9f9;
+  transition: border-color 0.2s;
+}
+
+.avatar-ring:hover {
+  border-color: #000000;
+}
+
+.avatar-ring img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #999999;
+}
+
+.avatar-placeholder svg {
+  width: 16px;
+  height: 16px;
+  margin-bottom: 4px;
+}
+
+.avatar-placeholder span {
+  font-size: 10px;
+  font-weight: 300;
+}
+
+/* --- Mobile Stacking --- */
+@media (max-width: 768px) {
+  .onboarding-split-root {
+    flex-direction: column;
+  }
+
+  .split-left {
+    flex: 0 0 35%;
+    padding: 32px 24px;
+    align-items: center;
+    text-align: center;
+  }
+
+  .split-left-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .split-logo {
+    margin-bottom: 24px;
+  }
+
+  .split-feats {
+    display: none;
+    /* Hide on mobile to save space */
+  }
+
+  .split-right {
+    flex: 1;
+    border-radius: 24px 24px 0 0;
+    margin-top: -24px;
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.1);
+    z-index: 20;
+    align-items: flex-start;
+    padding-top: 40px;
+  }
+
+  .split-back {
+    top: 24px;
+    left: 24px;
+    border: none;
+    background: var(--surface);
+  }
+
+  .step-motion-wrap {
+    padding: 0 24px;
+  }
+}
