@@ -1,7 +1,5 @@
 // src/ai/replyEngine.ts
 // Generates AI replies using multi-provider fallback system.
-// Primary: Ollama (local, free) → Fallback: HuggingFace (cloud, free tier)
-// Handles: context window assembly, reply generation, confidence scoring, anti-loop protection.
 
 import { buildSystemPrompt, PersonalityContext, calculateTypingDelay } from './personality';
 import { classifyMessage, ClassificationResult } from './classifier';
@@ -9,17 +7,21 @@ import { getUserStyle, getContactMemory, getOrBuildSummary } from './memory';
 import { prisma } from '../config/prisma';
 import { PersonalityType } from './personality';
 import { createProviderManager } from './providers';
+import {
+  detectLanguageVariant,
+  buildLanguagePrompt,
+  validateLanguageMatch,
+} from './languageDetector';
 
 let providerManager = createProviderManager();
 
-// Marker prefix so we can detect and skip AI-generated messages in message service
 export const AI_SENDER_MARKER = '__AI_AUTO__';
 
 export interface ReplyEngineInput {
   incomingMessage: string;
   chatId: string;
-  ownerId: string;          // The person who enabled Auto Messenger
-  contactId: string;        // The person who sent the message
+  ownerId: string;
+  contactId: string;
   ownerUsername: string;
   contactUsername: string;
   personality: PersonalityType;
@@ -28,13 +30,15 @@ export interface ReplyEngineInput {
 
 export interface ReplyEngineOutput {
   reply: string;
+  draftReply: string;
+  holdingReply?: string;
   classification: ClassificationResult;
   confidence: number;
   typingDelayMs: number;
   needsApproval: boolean;
+  languageVariant?: string;
 }
 
-// Risk levels that require approval (only these trigger manual review)
 const REQUIRES_APPROVAL: ClassificationResult['risk'][] = [
   'EMERGENCY',
   'PAYMENT',
@@ -42,7 +46,6 @@ const REQUIRES_APPROVAL: ClassificationResult['risk'][] = [
   'SENSITIVE',
 ];
 
-// Holding replies for when user needs to approve (buys time without committing)
 const HOLDING_REPLIES: Record<string, string[]> = {
   MEETING: [
     "Let me check my schedule and get back to you!",
@@ -68,7 +71,6 @@ function pickHoldingReply(risk: ClassificationResult['risk']): string {
   return options[Math.floor(Math.random() * options.length)];
 }
 
-// ─── Recent message context ────────────────────────────────────────────────────
 async function getRecentMessages(chatId: string, limit = 20) {
   const msgs = await prisma.message.findMany({
     where: { chatId, type: 'TEXT', isDeleted: false },
@@ -79,7 +81,6 @@ async function getRecentMessages(chatId: string, limit = 20) {
   return msgs.reverse();
 }
 
-// ─── Main reply generator ──────────────────────────────────────────────────────
 export async function generateReply(input: ReplyEngineInput): Promise<ReplyEngineOutput> {
   const {
     incomingMessage,
@@ -92,23 +93,25 @@ export async function generateReply(input: ReplyEngineInput): Promise<ReplyEngin
     customPrompt,
   } = input;
 
-  // 1. Classify the incoming message
+  const languageDetection = detectLanguageVariant(incomingMessage);
+  const languagePrompt = buildLanguagePrompt(languageDetection, incomingMessage);
+
   const classification = await classifyMessage(incomingMessage);
 
-  // 2. Skip if contains critical keywords (emergency, sensitive, etc.)
   if (['EMERGENCY', 'SENSITIVE'].includes(classification.risk)) {
-    console.log(`[ReplyEngine] Skipping critical message (${classification.risk}): ${incomingMessage.slice(0, 50)}`);
     const holdingReply = pickHoldingReply(classification.risk);
     return {
       reply: holdingReply,
+      draftReply: holdingReply,
+      holdingReply,
       classification,
       confidence: 1,
       typingDelayMs: calculateTypingDelay(holdingReply.length),
       needsApproval: true,
+      languageVariant: languageDetection.variant,
     };
   }
 
-  // 3. Gather memory & style
   const [style, contactMemory, conversationSummary, recentMsgs] = await Promise.all([
     getUserStyle(ownerId),
     getContactMemory(ownerId, contactId),
@@ -124,63 +127,73 @@ export async function generateReply(input: ReplyEngineInput): Promise<ReplyEngin
     conversationSummary,
     ownerUsername,
     contactUsername,
+    languageDetection,
+    languagePrompt,
   };
 
   const systemPrompt = buildSystemPrompt(ctx);
 
-  // 4. Build conversation history for Ollama (last 20 messages)
   const history = recentMsgs.map((m) => ({
     role: m.sender.id === ownerId ? 'assistant' : 'user',
     content: m.content || '',
   }));
 
-  let reply = '';
-  let usedProvider = 'unknown';
+  let draftReply = '';
   let confidence = classification.confidence;
 
   try {
-    // 5. Generate reply via provider manager (with fallback)
     const result = await providerManager.generateReply(systemPrompt, [
       ...history.slice(0, -1),
       { role: 'user', content: incomingMessage },
     ]);
 
-    reply = result.reply;
-    usedProvider = result.provider;
+    draftReply = result.reply;
 
-    if (!reply) {
-      reply = "Thanks for your message! I'll get back to you soon.";
+    if (!draftReply) {
+      draftReply = "Thanks for your message! I'll get back to you soon.";
       confidence = 0.6;
     }
 
-    // Confidence adjustments
-    if (reply.length > 300) confidence *= 0.85;
-    if (reply.includes('I think') || reply.includes('maybe')) confidence *= 0.9;
+    if (draftReply.length > 300) confidence *= 0.85;
+    if (draftReply.includes('I think') || draftReply.includes('maybe')) confidence *= 0.9;
+
+    const languageMatch = validateLanguageMatch(languageDetection, draftReply);
+    if (!languageMatch.isValid) {
+      console.warn(`[ReplyEngine] Language mismatch: ${languageMatch.warning}`);
+    }
   } catch (err) {
     console.error('[ReplyEngine] All providers failed:', (err as Error).message);
-    // Safe fallback when all providers are down
-    reply = 'Thanks for reaching out! I\'ll respond shortly.';
-    usedProvider = 'fallback';
+    draftReply = 'Thanks for reaching out! I\'ll respond shortly.';
     confidence = 0.4;
   }
 
-  // 6. Determine if approval is needed
-  const riskRequiresApproval = REQUIRES_APPROVAL.includes(classification.risk);
-  const needsApproval = riskRequiresApproval;
+  const needsApproval = REQUIRES_APPROVAL.includes(classification.risk);
 
-  // 7. For risky messages, replace with safe holding reply
-  const finalReply = needsApproval ? pickHoldingReply(classification.risk) : reply;
+  if (needsApproval) {
+    const holdingReply = pickHoldingReply(classification.risk);
+    return {
+      reply: holdingReply,
+      draftReply,
+      holdingReply,
+      classification,
+      confidence,
+      typingDelayMs: calculateTypingDelay(holdingReply.length),
+      needsApproval: true,
+      languageVariant: languageDetection.variant,
+    };
+  }
 
   return {
-    reply: finalReply,
+    reply: draftReply,
+    draftReply,
     classification,
     confidence,
-    typingDelayMs: calculateTypingDelay(finalReply.length),
-    needsApproval,
+    typingDelayMs: calculateTypingDelay(draftReply.length),
+    needsApproval: false,
+    languageVariant: languageDetection.variant,
   };
 }
 
-// ─── Sleeping hours check ──────────────────────────────────────────────────────
 export function isInSleepWindow(sleepStart: string, sleepEnd: string, tz: string): boolean {
   try {
     const now = new Date().toLocaleString('en-US', { timeZone: tz });
@@ -194,7 +207,6 @@ export function isInSleepWindow(sleepStart: string, sleepEnd: string, tz: string
     const endMins = endH * 60 + endM;
 
     if (startMins > endMins) {
-      // Overnight window (e.g., 23:00 – 07:00)
       return mins >= startMins || mins < endMins;
     }
     return mins >= startMins && mins < endMins;

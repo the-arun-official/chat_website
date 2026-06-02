@@ -22,6 +22,11 @@ router.put('/memory/:contactId', ctrl.updateMemory);
 
 router.get('/health/providers', ctrl.healthCheck);
 
+router.get('/:chatId/rules', ctrl.getRules);
+router.post('/:chatId/rules', ctrl.createRule);
+router.patch('/:chatId/rules/:ruleId', ctrl.updateRule);
+router.delete('/:chatId/rules/:ruleId', ctrl.deleteRule);
+
 router.get('/:chatId', ctrl.getConfig);
 router.put('/:chatId', ctrl.upsertConfig);
 

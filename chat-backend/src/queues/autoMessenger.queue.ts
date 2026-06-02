@@ -2,12 +2,14 @@
 // BullMQ queue for AI Auto Messenger message processing.
 
 import { Queue, Worker, Job } from 'bullmq';
+import { Prisma } from '@prisma/client';
 import { bullRedisConnection } from '../config/bullmq';
 import { prisma } from '../config/prisma';
 import { generateReply, isInSleepWindow } from '../ai/replyEngine';
 import { getIO } from '../sockets/socket.server';
 import { notificationQueue } from './notification.queue';
 import { invalidateSummary } from '../ai/memory';
+import { AutoReplyRuleService } from '../models/autoReplyRule';
 
 export const autoMessengerQueue = new Queue('auto-messenger', {
   connection: bullRedisConnection as any,
@@ -28,23 +30,55 @@ export interface AutoMessengerJobData {
   configId: string;
 }
 
+interface AIMessageMetadata {
+  personality?: string;
+  languageVariant?: string;
+  source?: string;
+  confidence?: number;
+}
+
+async function checkAutoReplyRules(message: string, chatId: string, ownerId: string) {
+  const rules = await prisma.autoReplyRule.findMany({
+    where: { userId: ownerId, chatId, enabled: true },
+    orderBy: { priority: 'desc' },
+  });
+
+  if (rules.length === 0) return null;
+
+  const matched = AutoReplyRuleService.matchMessage(message, rules);
+  if (!matched) return null;
+
+  if (matched.responseType === 'FIXED' && matched.fixedResponse) {
+    return { reply: matched.fixedResponse, source: 'RULE' as const };
+  }
+
+  if (matched.responseType === 'AI_ENHANCED') {
+    return { reply: null, source: 'AI_ENHANCED' as const, rule: matched };
+  }
+
+  return null;
+}
+
 export function startAutoMessengerWorker() {
   const worker = new Worker<AutoMessengerJobData>(
     'auto-messenger',
     async (job: Job<AutoMessengerJobData>) => {
       const startedAt = Date.now();
-      const { chatId, senderId, content, ownerId, configId, incomingMessageId } = job.data;
+      const { chatId, senderId, ownerId, configId, incomingMessageId } = job.data;
+      const content = job.data.content ?? '';
 
-      // CRITICAL: Skip if the sender is the config owner themselves
-      // This prevents the AI from replying to its own user's outgoing messages
+      if (!content.trim()) {
+        console.log(`[AutoMessenger] Empty message content — skipping job ${job.id}`);
+        return;
+      }
+
       if (senderId === ownerId) {
         console.log(`[AutoMessenger] Sender is the owner — skipping to prevent self-reply loop`);
         return;
       }
 
-      // Skip if the incoming message was AI-generated (anti-loop)
       const wasIncomingAiGenerated = await prisma.aIMessageLog.findFirst({
-        where: { messageId: incomingMessageId }
+        where: { messageId: incomingMessageId },
       });
       if (wasIncomingAiGenerated) {
         console.log(`[AutoMessenger] Incoming message was AI generated — skipping`);
@@ -77,11 +111,10 @@ export function startAutoMessengerWorker() {
         io.to(chatId).emit('typing_start', { chatId, userId: ownerId });
         await sleep(2000);
         io.to(chatId).emit('typing_stop', { chatId, userId: ownerId });
-        await sendAIMessage(
-          ownerId,
-          chatId,
-          "I'm in offline mode. Once I'm back online, I'll get back to you soon 🙂"
-        );
+        await sendAIMessage(ownerId, chatId, "I'm in offline mode. Once I'm back online, I'll get back to you soon 🙂", {
+          personality: config.personality,
+          source: 'OFFLINE',
+        });
         return;
       }
 
@@ -100,11 +133,52 @@ export function startAutoMessengerWorker() {
             io.to(chatId).emit('typing_start', { chatId, userId: ownerId });
             await sleep(2000);
             io.to(chatId).emit('typing_stop', { chatId, userId: ownerId });
-            await sendAIMessage(ownerId, chatId, 'Currently unavailable. Will respond later 🌙');
+            await sendAIMessage(ownerId, chatId, 'Currently unavailable. Will respond later 🌙', {
+              personality: config.personality,
+              source: 'SLEEP',
+            });
           }
           return;
         }
       }
+
+      const ruleMatch = await checkAutoReplyRules(content, chatId, ownerId);
+
+      if (ruleMatch && ruleMatch.source === 'RULE') {
+        const io = getIO();
+        io.to(chatId).emit('typing_start', { chatId, userId: ownerId });
+        await sleep(1500);
+        io.to(chatId).emit('typing_stop', { chatId, userId: ownerId });
+
+        const sentMessage = await sendAIMessage(ownerId, chatId, ruleMatch.reply, {
+          personality: config.personality,
+          source: 'RULE',
+        });
+
+        await prisma.aIMessageLog.create({
+          data: {
+            userId: ownerId,
+            chatId,
+            messageId: sentMessage?.id,
+            incomingMsg: content,
+            aiReply: ruleMatch.reply,
+            riskType: 'SAFE' as any,
+            confidence: 1,
+            wasAutoSent: true,
+            personality: config.personality,
+            processingMs: Date.now() - startedAt,
+            source: 'RULE',
+          },
+        });
+
+        await invalidateSummary(ownerId, chatId);
+        return;
+      }
+
+      const enhancedPrompt =
+        ruleMatch?.source === 'AI_ENHANCED' && ruleMatch.rule?.aiPromptEnhancement
+          ? `${config.customPrompt || ''}\n${ruleMatch.rule.aiPromptEnhancement}`.trim()
+          : config.customPrompt ?? undefined;
 
       if (config.mode === 'DRAFT_ONLY') {
         const draftResult = await generateReply({
@@ -115,7 +189,7 @@ export function startAutoMessengerWorker() {
           ownerUsername: config.user.username,
           contactUsername: contact.username,
           personality: config.personality,
-          customPrompt: config.customPrompt ?? undefined,
+          customPrompt: enhancedPrompt,
         });
 
         await prisma.approvalRequest.create({
@@ -124,7 +198,7 @@ export function startAutoMessengerWorker() {
             userId: ownerId,
             chatId,
             incomingMsg: content,
-            aiDraft: draftResult.reply,
+            aiDraft: draftResult.draftReply,
             riskType: draftResult.classification.risk as any,
             confidence: draftResult.confidence,
             status: 'PENDING',
@@ -150,7 +224,7 @@ export function startAutoMessengerWorker() {
         ownerUsername: config.user.username,
         contactUsername: contact.username,
         personality: config.personality,
-        customPrompt: config.customPrompt ?? undefined,
+        customPrompt: enhancedPrompt,
       });
 
       if (result.needsApproval) {
@@ -160,7 +234,7 @@ export function startAutoMessengerWorker() {
             userId: ownerId,
             chatId,
             incomingMsg: content,
-            aiDraft: result.reply,
+            aiDraft: result.draftReply,
             riskType: result.classification.risk as any,
             confidence: result.confidence,
             status: 'PENDING',
@@ -172,17 +246,18 @@ export function startAutoMessengerWorker() {
         io.to(chatId).emit('typing_start', { chatId, userId: ownerId });
         await sleep(result.typingDelayMs);
         io.to(chatId).emit('typing_stop', { chatId, userId: ownerId });
-        await sendAIMessage(ownerId, chatId, result.reply);
+        await sendAIMessage(ownerId, chatId, result.reply, {
+          personality: config.personality,
+          languageVariant: result.languageVariant,
+          source: 'HOLDING',
+          confidence: result.confidence,
+        });
 
         await notificationQueue.add('send-push', {
           userId: ownerId,
           title: `⚠️ Approval Needed — ${getRiskLabel(result.classification.risk)}`,
           body: `${contact.username}: "${content.slice(0, 60)}"`,
-          data: {
-            type: 'APPROVAL_REQUEST',
-            chatId,
-            approvalId: approval.id,
-          },
+          data: { type: 'APPROVAL_REQUEST', chatId, approvalId: approval.id },
         });
 
         try {
@@ -191,12 +266,12 @@ export function startAutoMessengerWorker() {
             chatId,
             contactUsername: contact.username,
             incomingMsg: content,
-            aiDraft: result.reply,
+            aiDraft: result.draftReply,
             riskType: result.classification.risk,
             confidence: result.confidence,
             expiresAt: approval.expiresAt,
           });
-        } catch { /* ignore if user offline */ }
+        } catch { /* ignore */ }
 
         await prisma.aIMessageLog.create({
           data: {
@@ -208,7 +283,9 @@ export function startAutoMessengerWorker() {
             confidence: result.confidence,
             wasAutoSent: true,
             personality: config.personality,
+            language: result.languageVariant,
             processingMs: Date.now() - startedAt,
+            source: 'HOLDING',
           },
         });
 
@@ -220,7 +297,12 @@ export function startAutoMessengerWorker() {
       await sleep(result.typingDelayMs);
       io.to(chatId).emit('typing_stop', { chatId, userId: ownerId });
 
-      const sentMessage = await sendAIMessage(ownerId, chatId, result.reply);
+      const sentMessage = await sendAIMessage(ownerId, chatId, result.draftReply, {
+        personality: config.personality,
+        languageVariant: result.languageVariant,
+        source: 'PRIMARY',
+        confidence: result.confidence,
+      });
 
       await prisma.aIMessageLog.create({
         data: {
@@ -228,12 +310,14 @@ export function startAutoMessengerWorker() {
           chatId,
           messageId: sentMessage?.id,
           incomingMsg: content,
-          aiReply: result.reply,
+          aiReply: result.draftReply,
           riskType: result.classification.risk as any,
           confidence: result.confidence,
           wasAutoSent: true,
           personality: config.personality,
+          language: result.languageVariant,
           processingMs: Date.now() - startedAt,
+          source: 'PRIMARY',
         },
       });
 
@@ -264,7 +348,9 @@ function sleep(ms: number): Promise<void> {
 function getRiskLabel(risk: string): string {
   const labels: Record<string, string> = {
     SCHEDULING: 'Meeting Request',
+    MEETING: 'Meeting Request',
     MONEY: 'Financial Request',
+    PAYMENT: 'Financial Request',
     COMMITMENT: 'Commitment Request',
     EMERGENCY: 'Urgent Message',
     SENSITIVE: 'Sensitive Request',
@@ -272,7 +358,12 @@ function getRiskLabel(risk: string): string {
   return labels[risk] || 'AI Needs Assistance';
 }
 
-async function sendAIMessage(ownerId: string, chatId: string, content: string) {
+async function sendAIMessage(
+  ownerId: string,
+  chatId: string,
+  content: string,
+  metadata?: AIMessageMetadata
+) {
   try {
     const message = await prisma.message.create({
       data: {
@@ -280,6 +371,8 @@ async function sendAIMessage(ownerId: string, chatId: string, content: string) {
         senderId: ownerId,
         type: 'TEXT',
         content,
+        isAI: true,
+        aiMetadata: metadata ? (metadata as Prisma.InputJsonValue) : undefined,
       },
       include: { sender: { select: { username: true, id: true } } },
     });
@@ -299,7 +392,7 @@ async function sendAIMessage(ownerId: string, chatId: string, content: string) {
       participants.forEach((p) => {
         getIO().to(p.userId).emit('chat_updated', {
           chatId,
-          lastMessage: { ...message, status: 'SENT' },
+          lastMessage: { ...message, status: 'SENT', isAI: true },
         });
       });
     } catch { /* socket may not be available */ }

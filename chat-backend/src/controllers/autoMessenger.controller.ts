@@ -117,6 +117,59 @@ export class AutoMessengerController {
     }
   };
 
+  getRules = async (req: AuthRequest, res: Response) => {
+    try {
+      const rules = await service.getRules(req.userId!, req.params.chatId as string);
+      res.json(rules);
+    } catch (err: any) {
+      const status = err.message.includes('not a member') ? 403 : 400;
+      res.status(status).json({ error: err.message });
+    }
+  };
+
+  createRule = async (req: AuthRequest, res: Response) => {
+    try {
+      const rule = await service.createRule(
+        req.userId!,
+        req.params.chatId as string,
+        req.body
+      );
+      res.status(201).json(rule);
+    } catch (err: any) {
+      const status = err.message.includes('not a member') ? 403 : 400;
+      res.status(status).json({ error: err.message });
+    }
+  };
+
+  updateRule = async (req: AuthRequest, res: Response) => {
+    try {
+      const rule = await service.updateRule(
+        req.userId!,
+        req.params.chatId as string,
+        req.params.ruleId as string,
+        req.body
+      );
+      res.json(rule);
+    } catch (err: any) {
+      const status = err.message.includes('not found') ? 404 : err.message.includes('not a member') ? 403 : 400;
+      res.status(status).json({ error: err.message });
+    }
+  };
+
+  deleteRule = async (req: AuthRequest, res: Response) => {
+    try {
+      const result = await service.deleteRule(
+        req.userId!,
+        req.params.chatId as string,
+        req.params.ruleId as string
+      );
+      res.json(result);
+    } catch (err: any) {
+      const status = err.message.includes('not found') ? 404 : err.message.includes('not a member') ? 403 : 400;
+      res.status(status).json({ error: err.message });
+    }
+  };
+
   healthCheck = async (req: AuthRequest, res: Response) => {
     try {
       const status = providerManager.getProviderStatus();

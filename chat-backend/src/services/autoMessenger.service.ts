@@ -2,10 +2,15 @@
 // Business logic for all Auto Messenger API operations.
 
 import { prisma } from '../config/prisma';
-import { AutoMessengerMode, PersonalityType } from '@prisma/client';
-import { autoMessengerQueue } from '../queues/autoMessenger.queue';
+import {
+  AutoMessengerMode,
+  PersonalityType,
+  AutoReplyTriggerType,
+  AutoReplyResponseType,
+} from '@prisma/client';
 import { learnUserStyle } from '../ai/memory';
 import { getIO } from '../sockets/socket.server';
+import { AutoReplyRuleCreate, AutoReplyRuleService } from '../models/autoReplyRule';
 
 export class AutoMessengerService {
   async getConfig(userId: string, chatId: string) {
@@ -122,9 +127,110 @@ export class AutoMessengerService {
     return updated;
   }
 
+  private async assertPrivateChatMember(userId: string, chatId: string) {
+    const participant = await prisma.chatParticipant.findUnique({
+      where: { chatId_userId: { chatId, userId } },
+    });
+    if (!participant) throw new Error('You are not a member of this chat');
+
+    const chat = await prisma.chat.findUnique({ where: { id: chatId } });
+    if (chat?.type !== 'PRIVATE') throw new Error('Auto Messenger is only available for private chats');
+  }
+
+  async getRules(userId: string, chatId: string) {
+    await this.assertPrivateChatMember(userId, chatId);
+    return prisma.autoReplyRule.findMany({
+      where: { userId, chatId },
+      orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  async createRule(userId: string, chatId: string, data: AutoReplyRuleCreate) {
+    await this.assertPrivateChatMember(userId, chatId);
+
+    if (data.triggerType === 'PATTERN' && !AutoReplyRuleService.validatePattern(data.triggerValue)) {
+      throw new Error('Invalid regex pattern');
+    }
+    if (data.responseType === 'FIXED' && !data.fixedResponse?.trim()) {
+      throw new Error('fixedResponse is required for FIXED response type');
+    }
+
+    return prisma.autoReplyRule.create({
+      data: {
+        userId,
+        chatId,
+        triggerType: data.triggerType as AutoReplyTriggerType,
+        triggerValue: data.triggerValue,
+        responseType: data.responseType as AutoReplyResponseType,
+        fixedResponse: data.fixedResponse,
+        aiPromptEnhancement: data.aiPromptEnhancement,
+        caseSensitive: data.caseSensitive ?? false,
+        priority: data.priority ?? 5,
+        enabled: data.enabled ?? true,
+      },
+    });
+  }
+
+  async updateRule(
+    userId: string,
+    chatId: string,
+    ruleId: string,
+    data: Partial<AutoReplyRuleCreate> & { enabled?: boolean }
+  ) {
+    await this.assertPrivateChatMember(userId, chatId);
+
+    const existing = await prisma.autoReplyRule.findFirst({
+      where: { id: ruleId, userId, chatId },
+    });
+    if (!existing) throw new Error('Rule not found');
+
+    if (data.triggerValue && data.triggerType === 'PATTERN') {
+      if (!AutoReplyRuleService.validatePattern(data.triggerValue)) {
+        throw new Error('Invalid regex pattern');
+      }
+    } else if (data.triggerValue && existing.triggerType === 'PATTERN') {
+      if (!AutoReplyRuleService.validatePattern(data.triggerValue)) {
+        throw new Error('Invalid regex pattern');
+      }
+    }
+
+    return prisma.autoReplyRule.update({
+      where: { id: ruleId },
+      data: {
+        ...(data.triggerType !== undefined && { triggerType: data.triggerType as AutoReplyTriggerType }),
+        ...(data.triggerValue !== undefined && { triggerValue: data.triggerValue }),
+        ...(data.responseType !== undefined && { responseType: data.responseType as AutoReplyResponseType }),
+        ...(data.fixedResponse !== undefined && { fixedResponse: data.fixedResponse }),
+        ...(data.aiPromptEnhancement !== undefined && { aiPromptEnhancement: data.aiPromptEnhancement }),
+        ...(data.caseSensitive !== undefined && { caseSensitive: data.caseSensitive }),
+        ...(data.priority !== undefined && { priority: data.priority }),
+        ...(data.enabled !== undefined && { enabled: data.enabled }),
+      },
+    });
+  }
+
+  async deleteRule(userId: string, chatId: string, ruleId: string) {
+    await this.assertPrivateChatMember(userId, chatId);
+
+    const existing = await prisma.autoReplyRule.findFirst({
+      where: { id: ruleId, userId, chatId },
+    });
+    if (!existing) throw new Error('Rule not found');
+
+    await prisma.autoReplyRule.delete({ where: { id: ruleId } });
+    return { success: true };
+  }
+
   private async sendAsUser(userId: string, chatId: string, content: string) {
     const message = await prisma.message.create({
-      data: { chatId, senderId: userId, type: 'TEXT', content },
+      data: {
+        chatId,
+        senderId: userId,
+        type: 'TEXT',
+        content,
+        isAI: true,
+        aiMetadata: { source: 'APPROVAL' } as object,
+      },
     });
 
     await prisma.chatParticipant.updateMany({
@@ -133,7 +239,7 @@ export class AutoMessengerService {
     });
 
     try {
-      getIO().to(chatId).emit('new_message', { ...message, status: 'SENT' });
+      getIO().to(chatId).emit('new_message', { ...message, status: 'SENT', isAI: true });
     } catch { /* ignore */ }
 
     return message;

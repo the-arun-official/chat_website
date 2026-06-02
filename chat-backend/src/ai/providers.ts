@@ -56,7 +56,7 @@ class GroqProvider implements AIProvider {
   private apiKey: string;
   private model: string;
 
-  constructor(apiKey: string, model: string = 'llama3-70b-8192') {
+  constructor(apiKey: string, model: string = 'llama-3.3-70b-versatile') {
     this.apiKey = apiKey;
     this.model = model;
   }

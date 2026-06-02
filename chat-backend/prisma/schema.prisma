@@ -72,6 +72,7 @@ model User {
   reportsSubmitted Report[] @relation("Reporter")
   reportsReceived  Report[] @relation("ReportedUser")
   autoMessengerConfigs AutoMessengerConfig[]
+  autoReplyRules       AutoReplyRule[]
   userAIProfile    UserAIProfile?
   contactMemoriesOwned ContactMemory[] @relation("ContactMemoryOwner")
   contactMemoriesAbout ContactMemory[] @relation("ContactMemoryAbout")
@@ -103,6 +104,7 @@ model Chat {
   messages     Message[]
   groupDetails Group?
   autoMessengerConfigs AutoMessengerConfig[]
+  autoReplyRules       AutoReplyRule[] @relation("AutoReplyRules")
 
   @@index([type])
 }
@@ -157,6 +159,8 @@ model Message {
   isEdited        Boolean     @default(false)
   detectedLanguage String?
   translations     Json?
+  isAI             Boolean     @default(false)
+  aiMetadata       Json?
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
@@ -309,6 +313,17 @@ enum ApprovalStatus {
   EXPIRED
 }
 
+enum AutoReplyTriggerType {
+  KEYWORD
+  PATTERN
+  TIME_BASED
+}
+
+enum AutoReplyResponseType {
+  FIXED
+  AI_ENHANCED
+}
+
 model AutoMessengerConfig {
   id              String            @id @default(uuid())
   userId          String
@@ -389,11 +404,35 @@ model AIMessageLog {
   confidence   Float
   wasAutoSent  Boolean
   personality  PersonalityType
+  language     String?
+  source       String?
   processingMs Int?
   createdAt    DateTime    @default(now())
 
   @@index([userId])
   @@index([chatId])
   @@index([createdAt])
+}
+
+model AutoReplyRule {
+  id                  String                @id @default(cuid())
+  userId              String
+  chatId              String
+  user                User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chat                Chat                  @relation("AutoReplyRules", fields: [chatId], references: [id], onDelete: Cascade)
+  triggerType         AutoReplyTriggerType
+  triggerValue        String
+  responseType        AutoReplyResponseType
+  fixedResponse       String?
+  aiPromptEnhancement String?
+  enabled             Boolean               @default(true)
+  caseSensitive       Boolean               @default(false)
+  priority            Int                   @default(5)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  @@unique([userId, chatId, triggerValue])
+  @@index([userId])
+  @@index([chatId])
 }
 

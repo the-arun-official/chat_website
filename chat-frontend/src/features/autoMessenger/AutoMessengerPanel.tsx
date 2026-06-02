@@ -42,6 +42,23 @@ interface Analytics {
   avgResponseMs: number;
 }
 
+interface AutoReplyRule {
+  id: string;
+  triggerType: 'KEYWORD' | 'PATTERN' | 'TIME_BASED';
+  triggerValue: string;
+  responseType: 'FIXED' | 'AI_ENHANCED';
+  fixedResponse?: string;
+  aiPromptEnhancement?: string;
+  enabled: boolean;
+  priority: number;
+}
+
+const TRIGGER_TYPES = [
+  { value: 'KEYWORD' as const, label: 'Keywords', example: 'hello|hi|hey' },
+  { value: 'PATTERN' as const, label: 'Regex Pattern', example: '^when.*free' },
+  { value: 'TIME_BASED' as const, label: 'Time Window', example: '22:00-08:00' },
+];
+
 const PERSONALITIES: { value: Personality; label: string; emoji: string }[] = [
   { value: 'FRIENDLY',     label: 'Friendly',      emoji: '😊' },
   { value: 'CASUAL',       label: 'Casual',        emoji: '😎' },
@@ -84,18 +101,27 @@ export default function AutoMessengerPanel({ chatId, token, apiBase = '/api', so
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'settings' | 'approvals' | 'analytics'>('settings');
+  const [activeTab, setActiveTab] = useState<'settings' | 'autoreplies' | 'approvals' | 'analytics'>('settings');
   const [customReplyMap, setCustomReplyMap] = useState<Record<string, string>>({});
   const [learningStyle, setLearningStyle] = useState(false);
+  const [autoReplies, setAutoReplies] = useState<AutoReplyRule[]>([]);
+  const [showNewRuleForm, setShowNewRuleForm] = useState(false);
+  const [newRule, setNewRule] = useState<Partial<AutoReplyRule>>({
+    triggerType: 'KEYWORD',
+    responseType: 'FIXED',
+    priority: 5,
+    enabled: true,
+  });
 
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
   const fetchData = useCallback(async () => {
     try {
-      const [cfgRes, appRes, anaRes] = await Promise.all([
+      const [cfgRes, appRes, anaRes, rulesRes] = await Promise.all([
         fetch(`${apiBase}/auto-messenger/${chatId}`, { headers }),
         fetch(`${apiBase}/auto-messenger/approvals/pending`, { headers }),
         fetch(`${apiBase}/auto-messenger/analytics/summary`, { headers }),
+        fetch(`${apiBase}/auto-messenger/${chatId}/rules`, { headers }),
       ]);
       if (cfgRes.ok) {
         const cfg = await cfgRes.json();
@@ -103,6 +129,10 @@ export default function AutoMessengerPanel({ chatId, token, apiBase = '/api', so
       }
       if (appRes.ok) setApprovals(await appRes.json());
       if (anaRes.ok) setAnalytics(await anaRes.json());
+      if (rulesRes.ok) {
+        const rules = await rulesRes.json();
+        if (Array.isArray(rules)) setAutoReplies(rules);
+      }
     } catch (err) {
       console.error('AutoMessenger: failed to fetch data', err);
     } finally {
@@ -158,6 +188,60 @@ export default function AutoMessengerPanel({ chatId, token, apiBase = '/api', so
     }
   };
 
+  const addAutoReply = async () => {
+    if (!newRule.triggerValue || (newRule.responseType === 'FIXED' && !newRule.fixedResponse?.trim())) {
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(`${apiBase}/auto-messenger/${chatId}/rules`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(newRule),
+      });
+      if (res.ok) {
+        const rule = await res.json();
+        setAutoReplies((prev) => [...prev, rule]);
+        setNewRule({ triggerType: 'KEYWORD', responseType: 'FIXED', priority: 5, enabled: true });
+        setShowNewRuleForm(false);
+      }
+    } catch (err) {
+      console.error('AutoMessenger: failed to add rule', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteAutoReply = async (id: string) => {
+    if (!confirm('Delete this auto-reply rule?')) return;
+    try {
+      await fetch(`${apiBase}/auto-messenger/${chatId}/rules/${id}`, {
+        method: 'DELETE',
+        headers,
+      });
+      setAutoReplies((prev) => prev.filter((r) => r.id !== id));
+    } catch (err) {
+      console.error('AutoMessenger: failed to delete rule', err);
+    }
+  };
+
+  const toggleRule = async (id: string) => {
+    const rule = autoReplies.find((r) => r.id === id);
+    if (!rule) return;
+    try {
+      await fetch(`${apiBase}/auto-messenger/${chatId}/rules/${id}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ enabled: !rule.enabled }),
+      });
+      setAutoReplies((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r))
+      );
+    } catch (err) {
+      console.error('AutoMessenger: failed to toggle rule', err);
+    }
+  };
+
   if (loading) {
     return (
       <div className="am-panel am-loading">
@@ -193,8 +277,12 @@ export default function AutoMessengerPanel({ chatId, token, apiBase = '/api', so
         </div>
       )}
 
+      <div className="am-language-banner">
+        Language detection enabled — AI replies in Tanglish, Tamil, or English to match the contact.
+      </div>
+
       <div className="am-tabs">
-        {(['settings', 'approvals', 'analytics'] as const).map((tab) => (
+        {(['settings', 'autoreplies', 'approvals', 'analytics'] as const).map((tab) => (
           <button
             key={tab}
             className={`am-tab ${activeTab === tab ? 'am-tab--active' : ''}`}
@@ -203,7 +291,10 @@ export default function AutoMessengerPanel({ chatId, token, apiBase = '/api', so
             {tab === 'approvals' && approvals.length > 0 && (
               <span className="am-badge">{approvals.length}</span>
             )}
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === 'autoreplies' && autoReplies.filter((r) => r.enabled).length > 0 && (
+              <span className="am-badge">{autoReplies.filter((r) => r.enabled).length}</span>
+            )}
+            {tab === 'autoreplies' ? 'Auto-Replies' : tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
@@ -293,6 +384,156 @@ export default function AutoMessengerPanel({ chatId, token, apiBase = '/api', so
         </div>
       )}
 
+      {activeTab === 'autoreplies' && (
+        <div className="am-section">
+          <div className="am-rules-header">
+            <h4 className="am-rules-title">Custom Auto-Reply Rules</h4>
+            <button
+              type="button"
+              className="am-btn am-btn--secondary"
+              onClick={() => setShowNewRuleForm(!showNewRuleForm)}
+            >
+              {showNewRuleForm ? 'Cancel' : '+ Add Rule'}
+            </button>
+          </div>
+
+          {showNewRuleForm && (
+            <div className="am-rules-form">
+              <div className="am-field">
+                <label className="am-label">Trigger Type</label>
+                <select
+                  className="am-select"
+                  value={newRule.triggerType}
+                  onChange={(e) =>
+                    setNewRule({ ...newRule, triggerType: e.target.value as AutoReplyRule['triggerType'] })
+                  }
+                >
+                  {TRIGGER_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+                <p className="am-hint">
+                  e.g. {TRIGGER_TYPES.find((t) => t.value === newRule.triggerType)?.example}
+                </p>
+              </div>
+              <div className="am-field">
+                <label className="am-label">Trigger Value</label>
+                <input
+                  type="text"
+                  className="am-custom-input"
+                  placeholder={TRIGGER_TYPES.find((t) => t.value === newRule.triggerType)?.example}
+                  value={newRule.triggerValue || ''}
+                  onChange={(e) => setNewRule({ ...newRule, triggerValue: e.target.value })}
+                />
+              </div>
+              <div className="am-field">
+                <label className="am-label">Response Type</label>
+                <div className="am-rules-radio-row">
+                  <label>
+                    <input
+                      type="radio"
+                      checked={newRule.responseType === 'FIXED'}
+                      onChange={() => setNewRule({ ...newRule, responseType: 'FIXED' })}
+                    />
+                    Fixed
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      checked={newRule.responseType === 'AI_ENHANCED'}
+                      onChange={() => setNewRule({ ...newRule, responseType: 'AI_ENHANCED' })}
+                    />
+                    AI Enhanced
+                  </label>
+                </div>
+              </div>
+              {newRule.responseType === 'FIXED' ? (
+                <div className="am-field">
+                  <label className="am-label">Auto-Reply Message</label>
+                  <textarea
+                    className="am-textarea"
+                    rows={2}
+                    value={newRule.fixedResponse || ''}
+                    onChange={(e) => setNewRule({ ...newRule, fixedResponse: e.target.value })}
+                  />
+                </div>
+              ) : (
+                <div className="am-field">
+                  <label className="am-label">AI Enhancement (optional)</label>
+                  <textarea
+                    className="am-textarea"
+                    rows={2}
+                    placeholder="Extra instructions for the AI when this rule matches"
+                    value={newRule.aiPromptEnhancement || ''}
+                    onChange={(e) => setNewRule({ ...newRule, aiPromptEnhancement: e.target.value })}
+                  />
+                </div>
+              )}
+              <div className="am-field">
+                <label className="am-label">Priority (1–10)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  className="am-custom-input"
+                  value={newRule.priority ?? 5}
+                  onChange={(e) => setNewRule({ ...newRule, priority: parseInt(e.target.value, 10) })}
+                />
+              </div>
+              <button
+                type="button"
+                className="am-btn am-btn--approve"
+                onClick={addAutoReply}
+                disabled={saving}
+              >
+                Create Rule
+              </button>
+            </div>
+          )}
+
+          {autoReplies.length === 0 ? (
+            <div className="am-empty">
+              <span className="am-empty-icon">📭</span>
+              <p>No auto-reply rules yet.</p>
+            </div>
+          ) : (
+            <div className="am-rules-list">
+              {autoReplies.map((rule) => (
+                <div key={rule.id} className="am-rule-card">
+                  <div className="am-rule-card-header">
+                    <span className={`am-rule-badge am-rule-badge--${rule.triggerType.toLowerCase()}`}>
+                      {rule.triggerType}
+                    </span>
+                    <span className="am-rule-trigger">{rule.triggerValue}</span>
+                    <span className="am-rule-priority">P{rule.priority}</span>
+                    <div className="am-rule-actions">
+                      <button
+                        type="button"
+                        className={`am-rule-toggle ${rule.enabled ? 'am-rule-toggle--on' : ''}`}
+                        onClick={() => toggleRule(rule.id)}
+                        title={rule.enabled ? 'Disable' : 'Enable'}
+                      >
+                        {rule.enabled ? 'On' : 'Off'}
+                      </button>
+                      <button
+                        type="button"
+                        className="am-rule-delete"
+                        onClick={() => deleteAutoReply(rule.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                  <p className="am-rule-response">
+                    {rule.responseType === 'FIXED' ? rule.fixedResponse : rule.aiPromptEnhancement || '(AI enhanced)'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {activeTab === 'approvals' && (
         <div className="am-section">
           {approvals.length === 0 ? (
@@ -319,7 +560,7 @@ export default function AutoMessengerPanel({ chatId, token, apiBase = '/api', so
                   <p className="am-msg-text">{a.incomingMsg}</p>
                 </div>
                 <div className="am-approval-draft">
-                  <span className="am-msg-label">AI holding reply sent:</span>
+                  <span className="am-msg-label">AI draft (for approval):</span>
                   <p className="am-msg-text am-msg-text--draft">{a.aiDraft}</p>
                 </div>
                 <div className="am-approval-actions">

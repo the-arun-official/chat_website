@@ -30,6 +30,45 @@ export interface ContactMemoryBlob {
   lastTopics: string[];        // Last 5 conversation topics
 }
 
+const DEFAULT_CONTACT_MEMORY: ContactMemoryBlob = {
+  relationship: 'friend',
+  interests: [],
+  sharedHistory: [],
+  commitments: [],
+  lastTopics: [],
+};
+
+export function normalizeContactMemory(
+  blob: Partial<ContactMemoryBlob> | null | undefined
+): ContactMemoryBlob {
+  if (!blob || typeof blob !== 'object') {
+    return { ...DEFAULT_CONTACT_MEMORY };
+  }
+  return {
+    relationship: blob.relationship ?? DEFAULT_CONTACT_MEMORY.relationship,
+    workplace: blob.workplace,
+    interests: Array.isArray(blob.interests) ? blob.interests : [],
+    sharedHistory: Array.isArray(blob.sharedHistory) ? blob.sharedHistory : [],
+    commitments: Array.isArray(blob.commitments) ? blob.commitments : [],
+    lastTopics: Array.isArray(blob.lastTopics) ? blob.lastTopics : [],
+  };
+}
+
+export function normalizeStyleFingerprint(
+  style: Partial<StyleFingerprint> | null | undefined
+): StyleFingerprint | null {
+  if (!style || typeof style !== 'object') return null;
+  return {
+    favoriteWords: Array.isArray(style.favoriteWords) ? style.favoriteWords : [],
+    emojiFrequency: style.emojiFrequency ?? 'low',
+    usedEmojis: Array.isArray(style.usedEmojis) ? style.usedEmojis : [],
+    avgMsgLength: typeof style.avgMsgLength === 'number' ? style.avgMsgLength : 40,
+    grammar: style.grammar ?? 'casual',
+    preferredLanguage: style.preferredLanguage ?? 'en',
+    slangTerms: Array.isArray(style.slangTerms) ? style.slangTerms : [],
+  };
+}
+
 // ─── User Style Fingerprint ────────────────────────────────────────────────────
 
 const STYLE_CACHE_KEY = (userId: string) => `ai:style:${userId}`;
@@ -38,13 +77,18 @@ export async function getUserStyle(userId: string): Promise<StyleFingerprint | n
   // Try Redis cache first
   try {
     const cached = await redisClient.get(STYLE_CACHE_KEY(userId));
-    if (cached) return JSON.parse(cached);
+    if (cached) {
+      return normalizeStyleFingerprint(JSON.parse(cached));
+    }
   } catch { /* ignore */ }
 
   const profile = await prisma.userAIProfile.findUnique({ where: { userId } });
   if (!profile?.styleFingerprint) return null;
 
-  const style = profile.styleFingerprint as unknown as StyleFingerprint;
+  const style = normalizeStyleFingerprint(
+    profile.styleFingerprint as unknown as Partial<StyleFingerprint>
+  );
+  if (!style) return null;
   try {
     await redisClient.setEx(STYLE_CACHE_KEY(userId), 1800, JSON.stringify(style));
   } catch { /* ignore */ }
@@ -105,7 +149,8 @@ Return ONLY a JSON object (no markdown):
       raw = raw.replace(/^```json\s*/i, '').replace(/```$/, '').trim();
     }
 
-    const style = JSON.parse(raw) as StyleFingerprint;
+    const parsed = JSON.parse(raw) as Partial<StyleFingerprint>;
+    const style = normalizeStyleFingerprint(parsed)!;
 
     await prisma.userAIProfile.upsert({
       where: { userId },
@@ -143,20 +188,18 @@ export async function getContactMemory(
 ): Promise<ContactMemoryBlob> {
   try {
     const cached = await redisClient.get(CONTACT_CACHE_KEY(userId, contactId));
-    if (cached) return JSON.parse(cached);
+    if (cached) {
+      return normalizeContactMemory(JSON.parse(cached));
+    }
   } catch { /* ignore */ }
 
   const record = await prisma.contactMemory.findUnique({
     where: { userId_contactId: { userId, contactId } },
   });
 
-  const blob: ContactMemoryBlob = (record?.memoryBlob as unknown as ContactMemoryBlob) ?? {
-    relationship: 'friend',
-    interests: [],
-    sharedHistory: [],
-    commitments: [],
-    lastTopics: [],
-  };
+  const blob = normalizeContactMemory(
+    record?.memoryBlob as unknown as Partial<ContactMemoryBlob>
+  );
 
   try {
     await redisClient.setEx(CONTACT_CACHE_KEY(userId, contactId), 600, JSON.stringify(blob));
@@ -171,7 +214,7 @@ export async function updateContactMemory(
   patch: Partial<ContactMemoryBlob>
 ): Promise<void> {
   const existing = await getContactMemory(userId, contactId);
-  const updated = { ...existing, ...patch };
+  const updated = normalizeContactMemory({ ...existing, ...patch });
 
   await prisma.contactMemory.upsert({
     where: { userId_contactId: { userId, contactId } },
@@ -239,7 +282,13 @@ export async function getOrBuildSummary(
 
     await prisma.contactMemory.upsert({
       where: { userId_contactId: { userId, contactId } },
-      create: { userId, contactId, summary, summaryAt: new Date(), memoryBlob: {} },
+      create: {
+        userId,
+        contactId,
+        summary,
+        summaryAt: new Date(),
+        memoryBlob: DEFAULT_CONTACT_MEMORY as any,
+      },
       update: { summary, summaryAt: new Date() },
     });
 

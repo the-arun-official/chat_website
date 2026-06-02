@@ -779,7 +779,7 @@ export const HomePage = () => {
                         <span className="status-text">{activeChatData.participants.length} Members</span>
                       )}
                       {otherUserAiModeEnabled && (
-                        <span className="ai-mode-status">AI mode</span>
+                        <span className="ai-mode-status">User In AI mode</span>
                       )}
                     </div>
                   </div>
@@ -925,6 +925,11 @@ export const HomePage = () => {
                               ) : (
                                 <span style={{ fontSize: '11px', color: '#fff' }}>{msg.sender?.username?.substring(0, 2).toUpperCase() || 'U'}</span>
                               )}
+                            </div>
+                          )}
+                          {msg.isAI && isOutgoing && (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                              <span style={{ fontSize: '10px', fontWeight: 600, color: '#818cf8', letterSpacing: '0.3px' }}>🤖 AI Reply</span>
                             </div>
                           )}
                           <div className="message-content" style={{ display: 'flex', flexDirection: isOutgoing ? 'row-reverse' : 'row', alignItems: 'center', gap: '8px' }}>
@@ -1137,11 +1142,11 @@ export const HomePage = () => {
                     <p>No messages yet. Say hi!</p>
                   </div>
                 )}
-                
+
                 {isTyping && (() => {
                   const activeChatData = chats.find(c => c.id === activeChatId);
                   const typingUserParticipant = activeChatData?.participants?.find(p => p.userId === otherTypingUsers[0]);
-                  
+
                   return (
                     <div className="message-row incoming typing-indicator-row">
                       <div className="message-avatar" style={{ alignSelf: 'flex-end', marginBottom: '8px', overflow: 'hidden', padding: 0, backgroundColor: 'var(--accent)' }}>
@@ -1168,7 +1173,7 @@ export const HomePage = () => {
                     </div>
                   );
                 })()}
-                
+
                 <div ref={messagesEndRef} />
               </div>
 
