@@ -9,12 +9,14 @@ import './Modals.css';
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  socket?: any;
 }
 
-export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
+export const SettingsModal = ({ isOpen, onClose, socket }: SettingsModalProps) => {
   const dispatch = useAppDispatch();
   const { showAlert, showConfirm } = useAlert();
   const { user } = useAppSelector(state => state.auth);
+  const { activeChatId } = useAppSelector(state => state.chat);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [fullName, setFullName] = useState(user?.fullName || '');
@@ -81,7 +83,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
             >
               My Profile
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab('translation')}
               style={{ background: 'none', border: 'none', padding: '12px 0', cursor: 'pointer', borderBottom: activeTab === 'translation' ? '2px solid var(--accent)' : '2px solid transparent', color: activeTab === 'translation' ? 'var(--accent)' : 'var(--color-text-dim)', fontWeight: 600, fontSize: '14px', marginBottom: '-1px' }}
             >
@@ -205,7 +207,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
             <LogOut size={16} /> Logout
           </button>
           </>
-          ) : (
+          ) : activeTab === 'translation' ? (
             <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '24px' }}>
               <div style={{ width: '100%' }}>
                 <label style={{ display: 'block', fontSize: '14px', color: 'var(--color-text)', marginBottom: '8px', fontWeight: 600 }}>Preferred Translation Language</label>
@@ -287,7 +289,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
                 />
               </div>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

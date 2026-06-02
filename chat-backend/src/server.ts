@@ -8,6 +8,8 @@ import { SocketServer } from './sockets/socket.server';
 import './workers/email.worker';
 import './workers/search.worker';
 import './workers/notification.worker';
+import { startAutoMessengerWorker } from './queues/autoMessenger.queue';
+import { startStyleLearningWorker, scheduleStyleLearning } from './workers/styleLearning.worker';
 
 // Load environment variables from .env
 dotenv.config();
@@ -31,6 +33,12 @@ async function bootstrap() {
     // Initialize Socket.IO Server
     const socketServer = new SocketServer(httpServer);
     console.log('🔌 Socket.IO Server initialized');
+
+    // Start AI Auto Messenger workers
+    startAutoMessengerWorker();
+    startStyleLearningWorker();
+    scheduleStyleLearning();
+    console.log('🤖 AI Auto Messenger workers started');
 
     // Start listening on HTTP Server instead of directly on Express app
     httpServer.listen(PORT, () => {

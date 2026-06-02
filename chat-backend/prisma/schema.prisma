@@ -71,6 +71,10 @@ model User {
   blockedBy        BlockedUser[] @relation("Blocked")
   reportsSubmitted Report[] @relation("Reporter")
   reportsReceived  Report[] @relation("ReportedUser")
+  autoMessengerConfigs AutoMessengerConfig[]
+  userAIProfile    UserAIProfile?
+  contactMemoriesOwned ContactMemory[] @relation("ContactMemoryOwner")
+  contactMemoriesAbout ContactMemory[] @relation("ContactMemoryAbout")
 
   @@index([email])
   @@index([username])
@@ -98,6 +102,7 @@ model Chat {
   participants ChatParticipant[]
   messages     Message[]
   groupDetails Group?
+  autoMessengerConfigs AutoMessengerConfig[]
 
   @@index([type])
 }
@@ -264,5 +269,131 @@ model Report {
   reason       String
   status       String   @default("PENDING") // PENDING, REVIEWED, RESOLVED
   createdAt    DateTime @default(now())
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  AI AUTO MESSENGER — SCHEMA ADDITIONS
+// ══════════════════════════════════════════════════════════════════
+
+enum AutoMessengerMode {
+  FULL_AUTO
+  SMART
+  DRAFT_ONLY
+}
+
+enum PersonalityType {
+  FRIENDLY
+  PROFESSIONAL
+  CASUAL
+  FUNNY
+  CORPORATE
+  SUPPORTIVE
+  ROMANTIC
+  CUSTOM
+}
+
+enum MessageRisk {
+  SAFE
+  SCHEDULING
+  MONEY
+  COMMITMENT
+  EMERGENCY
+  SENSITIVE
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CUSTOM_REPLIED
+  EXPIRED
+}
+
+model AutoMessengerConfig {
+  id              String            @id @default(uuid())
+  userId          String
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chatId          String
+  chat            Chat              @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  isEnabled       Boolean           @default(false)
+  mode            AutoMessengerMode @default(SMART)
+  personality     PersonalityType   @default(FRIENDLY)
+  customPrompt    String?
+  sleepStart      String?
+  sleepEnd        String?
+  timezone        String            @default("Asia/Kolkata")
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  approvals       ApprovalRequest[]
+
+  @@unique([userId, chatId])
+  @@index([userId])
+  @@index([chatId])
+}
+
+model UserAIProfile {
+  id               String   @id @default(uuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  styleFingerprint Json     @default("{}")
+  lastLearnedAt    DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model ContactMemory {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation("ContactMemoryOwner", fields: [userId], references: [id], onDelete: Cascade)
+  contactId    String
+  contact      User     @relation("ContactMemoryAbout", fields: [contactId], references: [id], onDelete: Cascade)
+  memoryBlob   Json     @default("{}")
+  summary      String?
+  summaryAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, contactId])
+  @@index([userId])
+}
+
+model ApprovalRequest {
+  id            String             @id @default(uuid())
+  configId      String
+  config        AutoMessengerConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  userId        String
+  chatId        String
+  incomingMsg   String
+  aiDraft       String
+  riskType      MessageRisk
+  confidence    Float
+  status        ApprovalStatus     @default(PENDING)
+  customReply   String?
+  expiresAt     DateTime
+  resolvedAt    DateTime?
+  createdAt     DateTime           @default(now())
+
+  @@index([userId, status])
+  @@index([chatId])
+}
+
+model AIMessageLog {
+  id           String      @id @default(uuid())
+  userId       String
+  chatId       String
+  messageId    String?
+  incomingMsg  String
+  aiReply      String
+  riskType     MessageRisk
+  confidence   Float
+  wasAutoSent  Boolean
+  personality  PersonalityType
+  processingMs Int?
+  createdAt    DateTime    @default(now())
+
+  @@index([userId])
+  @@index([chatId])
+  @@index([createdAt])
 }
 

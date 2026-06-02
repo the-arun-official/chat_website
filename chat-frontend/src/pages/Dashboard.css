@@ -452,6 +452,30 @@
   color: var(--text-primary);
 }
 
+.header-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ai-mode-toggle.active {
+  color: var(--accent);
+  background-color: var(--accent-soft);
+}
+
+.ai-mode-status {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background-color: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .header-text-btn {
   padding: 0 12px;
   height: 28px;

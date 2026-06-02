@@ -28,6 +28,7 @@ export interface Message {
   createdAt: string;
   isEdited: boolean;
   isDeleted: boolean;
+  isAI?: boolean;
   parentMessageId?: string;
   parentMessage?: {
     id: string;
@@ -67,6 +68,7 @@ export interface Chat {
   isPinned?: boolean;
   isArchived?: boolean;
   isMuted?: boolean;
+  aiModeUsers?: string[];
   _count?: {
     messages: number;
     participants: number;
@@ -158,7 +160,6 @@ const chatSlice = createSlice({
       
       // If it's a private chat, ensure we don't have an old ghost chat with the same user
       if (newChat.type === 'PRIVATE') {
-        const otherUserId = newChat.participants.find(p => p.userId !== state.activeChatId)?.[0]?.userId; // We don't have current user ID here easily, let's just find the exact matching participants array
         // Actually, a simpler way: find if there's any PRIVATE chat that has the exact same set of participant userIds.
         const newUserIds = newChat.participants.map(p => p.userId).sort().join(',');
         
@@ -256,6 +257,16 @@ const chatSlice = createSlice({
           // if (action.payload.lastSeen) participant.user.lastSeen = action.payload.lastSeen;
         }
       });
+    },
+    setAiModeStatus: (state, action: PayloadAction<{ chatId: string; userId: string; isEnabled: boolean }>) => {
+      const { chatId, userId, isEnabled } = action.payload;
+      const chat = state.chats.find(c => c.id === chatId);
+      if (!chat) return;
+
+      const aiModeUsers = chat.aiModeUsers || [];
+      chat.aiModeUsers = isEnabled
+        ? Array.from(new Set([...aiModeUsers, userId]))
+        : aiModeUsers.filter(id => id !== userId);
     }
   },
   extraReducers: (builder) => {
@@ -307,6 +318,7 @@ export const {
   updateMessageReceipt,
   updateChatLatestMessage,
   updateChat,
-  updateUserStatus
+  updateUserStatus,
+  setAiModeStatus
 } = chatSlice.actions;
 export default chatSlice.reducer;

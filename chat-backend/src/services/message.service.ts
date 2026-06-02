@@ -3,6 +3,7 @@ import { ChatRepository } from '../repositories/chat.repository';
 import { MessageType } from '@prisma/client';
 import { searchQueue } from '../queues/search.queue';
 import { notificationQueue } from '../queues/notification.queue';
+import { autoMessengerQueue } from '../queues/autoMessenger.queue';
 import { osClient } from '../config/opensearch';
 import { getIO } from '../sockets/socket.server';
 import { prisma } from '../config/prisma';
@@ -110,7 +111,7 @@ export class MessageService {
       chat.participants.forEach((participant: any) => {
         if (participant.userId !== userId) {
           if (chat.type === 'GROUP' && participant.hasAccepted === false) return;
-          
+
           notificationQueue.add('send-push', {
             userId: participant.userId,
             title: 'New Message',
@@ -119,6 +120,39 @@ export class MessageService {
           }).catch((err: any) => console.error('Failed to queue push notification', err));
         }
       });
+    }
+
+    // Fire-and-forget: queue AI Auto Messenger processing if enabled
+    if (chat && chat.type === 'PRIVATE' && data.content) {
+      const otherParticipants = chat.participants.filter((p: any) => p.userId !== userId);
+
+      for (const other of otherParticipants) {
+        try {
+          const config = await prisma.autoMessengerConfig.findUnique({
+            where: { userId_chatId: { userId: other.userId, chatId } },
+          });
+
+          if (config?.isEnabled) {
+            await autoMessengerQueue.add(
+              'process-incoming',
+              {
+                incomingMessageId: message.id,
+                chatId,
+                senderId: userId,
+                content: data.content,
+                ownerId: other.userId,
+                configId: config.id,
+              },
+              {
+                jobId: `am:${message.id}:${other.userId}`,
+                delay: 500,
+              }
+            );
+          }
+        } catch (err) {
+          console.error('[AutoMessenger] Queue failed:', err);
+        }
+      }
     }
 
     return message;

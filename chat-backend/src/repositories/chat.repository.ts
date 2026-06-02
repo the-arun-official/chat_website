@@ -109,6 +109,10 @@ export class ChatRepository {
         messages: {
           take: 1,
           orderBy: { createdAt: 'desc' }
+        },
+        autoMessengerConfigs: {
+          where: { isEnabled: true },
+          select: { userId: true, isEnabled: true }
         }
       },
       orderBy: { updatedAt: 'desc' }

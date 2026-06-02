@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAppDispatch, useAppSelector } from '../store/store';
-import { fetchChats, setActiveChat, fetchMessages, markChatAsRead, addMessage, updateMessage as updateMessageInStore, deleteMessage as deleteMessageInStore, updateChat, translateMessage } from '../features/chat/chatSlice';
+import { fetchChats, setActiveChat, fetchMessages, markChatAsRead, addMessage, updateMessage as updateMessageInStore, deleteMessage as deleteMessageInStore, updateChat, translateMessage, setAiModeStatus } from '../features/chat/chatSlice';
 import { logoutUser } from '../features/auth/authSlice';
 import type { Chat, Message } from '../features/chat/chatSlice';
 import { useSocket } from '../hooks/useSocket';
@@ -15,6 +15,7 @@ import { EmptyChatState } from '../components/ui/EmptyChatState';
 import { useAlert } from '../contexts/AlertContext';
 import api, { getMediaUrl } from '../services/api';
 import EmojiPicker, { Theme } from 'emoji-picker-react';
+import AutoMessengerPanel from '../features/autoMessenger/AutoMessengerPanel';
 import './Dashboard.css';
 import {
   Menu, Search, Home, Plus, MessageSquare, Users, Hash,
@@ -47,6 +48,8 @@ export const HomePage = () => {
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('direct');
+  const [showAISettings, setShowAISettings] = useState(false);
+  const [isSavingAIMode, setIsSavingAIMode] = useState(false);
   const [showOptionsPopup, setShowOptionsPopup] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
@@ -446,6 +449,30 @@ export const HomePage = () => {
   };
 
   const activeChatData = chats.find(c => c.id === activeChatId);
+  const aiModeUsers = activeChatData?.aiModeUsers || [];
+  const currentUserAiModeEnabled = !!user?.id && aiModeUsers.includes(user.id);
+  const otherPrivateParticipant = activeChatData?.type === 'PRIVATE'
+    ? activeChatData.participants.find(p => p.userId !== user?.id)
+    : null;
+  const otherUserAiModeEnabled = !!otherPrivateParticipant?.userId && aiModeUsers.includes(otherPrivateParticipant.userId);
+
+  const toggleActiveChatAIMode = async () => {
+    if (!activeChatId || !user?.id || activeChatData?.type !== 'PRIVATE' || isSavingAIMode) return;
+
+    const nextEnabled = !currentUserAiModeEnabled;
+    dispatch(setAiModeStatus({ chatId: activeChatId, userId: user.id, isEnabled: nextEnabled }));
+    setIsSavingAIMode(true);
+
+    try {
+      await api.put(`/auto-messenger/${activeChatId}`, { isEnabled: nextEnabled });
+    } catch (err) {
+      dispatch(setAiModeStatus({ chatId: activeChatId, userId: user.id, isEnabled: !nextEnabled }));
+      console.error('Failed to toggle AI mode', err);
+      showAlert('Failed to update AI mode. Try again.', 'error');
+    } finally {
+      setIsSavingAIMode(false);
+    }
+  };
 
   const amIBlockedOrBlockedBy = useMemo(() => {
     if (!activeChatData || activeChatData.type !== 'PRIVATE') return false;
@@ -751,11 +778,25 @@ export const HomePage = () => {
                       })() : (
                         <span className="status-text">{activeChatData.participants.length} Members</span>
                       )}
+                      {otherUserAiModeEnabled && (
+                        <span className="ai-mode-status">AI mode</span>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 <div className="chat-header-right">
+                  {activeChatData.type === 'PRIVATE' && (
+                    <button
+                      className={`header-action-btn ai-mode-toggle ${currentUserAiModeEnabled ? 'active' : ''}`}
+                      onClick={toggleActiveChatAIMode}
+                      disabled={isSavingAIMode}
+                      title={currentUserAiModeEnabled ? 'Turn AI mode off' : 'Turn AI mode on'}
+                      aria-label={currentUserAiModeEnabled ? 'Turn AI mode off' : 'Turn AI mode on'}
+                    >
+                      <Bot size={16} strokeWidth={1.7} />
+                    </button>
+                  )}
                   <button className="header-action-btn" onClick={() => setIsChatSearchOpen(!isChatSearchOpen)}><Search size={16} strokeWidth={1.5} /></button>
                   <div className="dropdown-container">
                     <button className="header-action-btn" onClick={() => setShowOptionsPopup(!showOptionsPopup)}>
@@ -783,6 +824,15 @@ export const HomePage = () => {
                           <Archive size={14} fill={activeChatData.isArchived ? 'currentColor' : 'none'} /> {activeChatData.isArchived ? 'Unarchive Chat' : 'Archive Chat'}
                         </button>
                         <div className="dropdown-divider"></div>
+
+                        {activeChatData.type === 'PRIVATE' && (
+                          <button onClick={() => {
+                            setShowAISettings(true);
+                            setShowOptionsPopup(false);
+                          }}>
+                            <Bot size={14} /> AI Settings
+                          </button>
+                        )}
 
                         {activeChatData.type === 'PRIVATE' && (() => {
                           const otherUserId = activeChatData.participants.find(p => p.userId !== user?.id)?.userId;
@@ -858,17 +908,19 @@ export const HomePage = () => {
                   </div>
                 ) : filteredMessages?.length > 0 ? (
                   filteredMessages.map((msg: Message, index: number) => {
-                    const isOutgoing = msg.senderId === user?.id;
+                    const isOutgoing = msg.senderId === user?.id && !msg.isAI;
                     const prevMsg = index > 0 ? filteredMessages[index - 1] : null;
-                    const isConsecutive = prevMsg && prevMsg.senderId === msg.senderId && (new Date(msg.createdAt).getTime() - new Date(prevMsg.createdAt).getTime() < 5 * 60 * 1000) && (new Date(msg.createdAt).toDateString() === new Date(prevMsg.createdAt).toDateString());
+                    const isConsecutive = prevMsg && prevMsg.senderId === msg.senderId && prevMsg.isAI === msg.isAI && (new Date(msg.createdAt).getTime() - new Date(prevMsg.createdAt).getTime() < 5 * 60 * 1000) && (new Date(msg.createdAt).toDateString() === new Date(prevMsg.createdAt).toDateString());
 
                     return (
                       <div key={msg.id} style={{ display: 'flex', flexDirection: 'column' }}>
                         {renderDateDivider(msg.createdAt, prevMsg?.createdAt || null)}
                         <div className={`message-row ${isOutgoing ? 'outgoing' : 'incoming'} ${msg.id.startsWith('temp-') ? 'optimistic' : ''}`} style={{ marginTop: isConsecutive ? '-12px' : '0' }}>
                           {!isOutgoing && (
-                            <div className="message-avatar" style={{ visibility: isConsecutive ? 'hidden' : 'visible', overflow: 'hidden', padding: 0, backgroundColor: 'var(--accent)' }}>
-                              {msg.sender?.avatarUrl ? (
+                            <div className="message-avatar" style={{ visibility: isConsecutive ? 'hidden' : 'visible', overflow: 'hidden', padding: 0, backgroundColor: msg.isAI ? 'var(--accent)' : 'var(--accent)' }}>
+                              {msg.isAI ? (
+                                <span style={{ fontSize: '11px', color: '#fff', fontWeight: 'bold' }}>🤖</span>
+                              ) : msg.sender?.avatarUrl ? (
                                 <img src={getMediaUrl(msg.sender.avatarUrl)!} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                               ) : (
                                 <span style={{ fontSize: '11px', color: '#fff' }}>{msg.sender?.username?.substring(0, 2).toUpperCase() || 'U'}</span>
@@ -1475,7 +1527,29 @@ export const HomePage = () => {
 
       {/* Settings Modal */}
       {isSettingsModalOpen && (
-        <SettingsModal isOpen={true} onClose={() => setIsSettingsModalOpen(false)} />
+        <SettingsModal isOpen={true} onClose={() => setIsSettingsModalOpen(false)} socket={socket} />
+      )}
+
+      {/* AI Settings Panel */}
+      {showAISettings && activeChatId && (
+        <div className="modal-backdrop" onClick={() => setShowAISettings(false)}>
+          <div className="settings-modal-container" onClick={e => e.stopPropagation()}>
+            <div className="search-modal-header" style={{ paddingBottom: '0', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: 'var(--color-text)' }}>🤖 AI Settings</h3>
+              <button className="search-modal-close" onClick={() => setShowAISettings(false)} style={{ alignSelf: 'auto', marginTop: 0 }}>
+                <X size={16} />
+              </button>
+            </div>
+            <div style={{ padding: '24px', overflowY: 'auto', maxHeight: '70vh' }}>
+              <AutoMessengerPanel
+                chatId={activeChatId}
+                token={user?.token || localStorage.getItem('accessToken') || ''}
+                apiBase={import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}
+                socket={socket}
+              />
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Translate Modal */}

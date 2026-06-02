@@ -47,7 +47,7 @@ export class ChatService {
   async getUserChats(userId: string) {
     const chats = await this.chatRepository.getUserChats(userId);
     return chats.map((chat: any) => {
-      const { messages, participants, ...rest } = chat;
+      const { messages, participants, autoMessengerConfigs, ...rest } = chat;
       const myParticipant = participants.find((p: any) => p.userId === userId);
       
       let lastMessage = messages?.[0] || null;
@@ -62,6 +62,7 @@ export class ChatService {
         isPinned: myParticipant?.isPinned || false,
         isArchived: myParticipant?.isArchived || false,
         isMuted: myParticipant?.isMuted || false,
+        aiModeUsers: (autoMessengerConfigs || []).map((config: any) => config.userId),
         lastMessage: lastMessage
       };
     });

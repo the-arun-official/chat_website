@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAppDispatch } from '../store/store';
-import { addMessage, updateChatLatestMessage, addChat, fetchChats, markChatAsRead, setTypingStatus, updateMessageReceipt, updateMessage, deleteMessage, updateUserStatus, translateMessage } from '../features/chat/chatSlice';
+import { addMessage, updateChatLatestMessage, addChat, fetchChats, markChatAsRead, setTypingStatus, updateMessageReceipt, updateMessage, deleteMessage, updateUserStatus, translateMessage, setAiModeStatus } from '../features/chat/chatSlice';
 import type { Message, Chat } from '../features/chat/chatSlice';
 import { store } from '../store/store';
 
@@ -154,6 +154,10 @@ export const useSocket = (activeChatId: string | null) => {
 
     newSocket.on('user_status_changed', (data: { userId: string; status: string }) => {
       dispatch(updateUserStatus(data));
+    });
+
+    newSocket.on('auto_messenger_status_changed', (data: { chatId: string; userId: string; isEnabled: boolean }) => {
+      dispatch(setAiModeStatus(data));
     });
 
     // Group Chat Events
