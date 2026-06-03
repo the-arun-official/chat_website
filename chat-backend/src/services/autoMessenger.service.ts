@@ -296,4 +296,119 @@ export class AutoMessengerService {
       update: { memoryBlob },
     });
   }
+
+  // ── PHASE 5: Pending Chat Reply (auto-reply for first-time contacts) ──
+  async getPendingChatReply(userId: string) {
+    let config = await prisma.pendingChatReply.findUnique({
+      where: { userId },
+    });
+
+    // Create default if not exists
+    if (!config) {
+      config = await prisma.pendingChatReply.create({
+        data: {
+          userId,
+          message: "Hey! 👋 Thanks for reaching out. The boss will get back to you soon!",
+        },
+      });
+    }
+
+    return config;
+  }
+
+  async updatePendingChatReply(userId: string, message: string) {
+    if (!message?.trim()) {
+      throw new Error('Message cannot be empty');
+    }
+
+    const config = await prisma.pendingChatReply.upsert({
+      where: { userId },
+      create: { userId, message },
+      update: { message },
+    });
+
+    return config;
+  }
+
+  // ── PHASE 7: Daily Status ──
+  async getDailyStatus(userId: string) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return prisma.dailyStatus.findUnique({
+      where: { userId },
+    });
+  }
+
+  async setDailyStatus(userId: string, text: string, timezone: string = 'Asia/Kolkata') {
+    if (text && text.length > 200) {
+      throw new Error('Status message must be 200 characters or less');
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const status = await prisma.dailyStatus.upsert({
+      where: { userId },
+      create: {
+        userId,
+        text: text || null,
+        timezone,
+        date: today,
+      },
+      update: {
+        text: text || null,
+        timezone,
+        date: today,
+      },
+    });
+
+    return status;
+  }
+
+  async clearDailyStatus(userId: string) {
+    try {
+      await prisma.dailyStatus.delete({
+        where: { userId },
+      });
+      return { success: true };
+    } catch {
+      // Already deleted or doesn't exist
+      return { success: true };
+    }
+  }
+
+  // ── PHASE 10: VIP Contacts ──
+  async getVIPContacts(userId: string, chatId: string) {
+    const config = await this.getConfig(userId, chatId);
+    if (!config) return [];
+    return (config.vipContacts as string[]) || [];
+  }
+
+  async addVIPContact(userId: string, chatId: string, contactUsername: string) {
+    const config = await this.getConfig(userId, chatId);
+    if (!config) throw new Error('Config not found for this chat');
+
+    const vipList = (config.vipContacts as string[]) || [];
+    if (!vipList.includes(contactUsername)) {
+      vipList.push(contactUsername);
+    }
+
+    return prisma.autoMessengerConfig.update({
+      where: { id: config.id },
+      data: { vipContacts: vipList },
+    });
+  }
+
+  async removeVIPContact(userId: string, chatId: string, contactUsername: string) {
+    const config = await this.getConfig(userId, chatId);
+    if (!config) throw new Error('Config not found for this chat');
+
+    const vipList = ((config.vipContacts as string[]) || []).filter(u => u !== contactUsername);
+
+    return prisma.autoMessengerConfig.update({
+      where: { id: config.id },
+      data: { vipContacts: vipList.length > 0 ? vipList : undefined },
+    });
+  }
 }

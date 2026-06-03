@@ -27,6 +27,10 @@ export const useSocket = (activeChatId: string | null) => {
     const newSocket = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket'],
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      reconnectionAttempts: 5,
     });
 
     setSocket(newSocket);
@@ -37,6 +41,19 @@ export const useSocket = (activeChatId: string | null) => {
         newSocket.emit('join_chat', activeChatIdRef.current);
       }
     });
+
+    // Handle token refresh - reconnect socket with new token
+    const handleTokenRefreshed = (event: CustomEvent) => {
+      const newToken = event.detail?.token;
+      if (newToken) {
+        console.log('🔄 Token refreshed, reconnecting socket...');
+        newSocket.auth = { token: newToken };
+        newSocket.disconnect();
+        newSocket.connect();
+      }
+    };
+
+    window.addEventListener('tokenRefreshed', handleTokenRefreshed as EventListener);
 
     const playNotificationSound = () => {
       try {
@@ -178,6 +195,7 @@ export const useSocket = (activeChatId: string | null) => {
     });
 
     return () => {
+      window.removeEventListener('tokenRefreshed', handleTokenRefreshed as EventListener);
       newSocket.disconnect();
     };
   }, []); // Connect once on mount

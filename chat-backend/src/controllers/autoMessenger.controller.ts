@@ -182,4 +182,100 @@ export class AutoMessengerController {
       res.status(500).json({ error: err.message });
     }
   };
+
+  // ── PHASE 5: Pending Chat Reply ──
+  getPendingReply = async (req: AuthRequest, res: Response) => {
+    try {
+      const config = await service.getPendingChatReply(req.userId!);
+      res.json(config);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+
+  updatePendingReply = async (req: AuthRequest, res: Response) => {
+    try {
+      const { message } = req.body;
+      if (!message?.trim()) {
+        return res.status(400).json({ error: 'message is required' });
+      }
+
+      const config = await service.updatePendingChatReply(req.userId!, message);
+      res.json(config);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  };
+
+  // ── PHASE 7: Daily Status ──
+  getDailyStatus = async (req: AuthRequest, res: Response) => {
+    try {
+      const status = await service.getDailyStatus(req.userId!);
+      res.json(status ?? null);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+
+  setDailyStatus = async (req: AuthRequest, res: Response) => {
+    try {
+      const { text, timezone } = req.body;
+      const status = await service.setDailyStatus(req.userId!, text || '', timezone || 'Asia/Kolkata');
+      res.json(status);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  };
+
+  clearDailyStatus = async (req: AuthRequest, res: Response) => {
+    try {
+      const result = await service.clearDailyStatus(req.userId!);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+
+  // ── PHASE 10: VIP Contacts ──
+  getVIPContacts = async (req: AuthRequest, res: Response) => {
+    try {
+      const chatId = req.params.chatId as string;
+      const vipList = await service.getVIPContacts(req.userId!, chatId);
+      res.json(vipList);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  };
+
+  addVIPContact = async (req: AuthRequest, res: Response) => {
+    try {
+      const chatId = req.params.chatId as string;
+      const { contactUsername } = req.body;
+
+      if (!contactUsername?.trim()) {
+        return res.status(400).json({ error: 'contactUsername is required' });
+      }
+
+      const config = await service.addVIPContact(req.userId!, chatId, contactUsername);
+      res.json(config);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  };
+
+  removeVIPContact = async (req: AuthRequest, res: Response) => {
+    try {
+      const chatId = req.params.chatId as string;
+      const { contactUsername } = req.body;
+
+      if (!contactUsername?.trim()) {
+        return res.status(400).json({ error: 'contactUsername is required' });
+      }
+
+      const config = await service.removeVIPContact(req.userId!, chatId, contactUsername);
+      res.json(config);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  };
 }

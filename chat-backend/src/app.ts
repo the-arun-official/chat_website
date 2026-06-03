@@ -24,6 +24,7 @@ import messageRoutes from './routes/message.routes';
 import contactRoutes from './routes/contact.routes';
 import featuresRoutes from './routes/features.routes';
 import autoMessengerRouter from './routes/autoMessenger.routes';
+import aiAssistantRouter from './routes/aiAssistant.routes';
 
 app.use('/api/users', userRoutes);
 app.use('/api/chats', chatRoutes);
@@ -32,6 +33,7 @@ app.use('/api', featuresRoutes);
 // Mount message routes on /api (handles both /api/chats/:id/messages and /api/messages/:id)
 app.use('/api', messageRoutes);
 app.use('/api/auto-messenger', autoMessengerRouter);
+app.use('/api/ai-assistant', aiAssistantRouter);
 
 
 export default app;

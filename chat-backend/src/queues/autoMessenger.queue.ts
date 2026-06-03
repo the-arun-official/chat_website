@@ -85,16 +85,6 @@ export function startAutoMessengerWorker() {
         return;
       }
 
-      const config = await prisma.autoMessengerConfig.findUnique({
-        where: { id: configId },
-        include: { user: { select: { username: true } } },
-      });
-
-      if (!config || !config.isEnabled) {
-        console.log(`[AutoMessenger] Config disabled or missing — skipping job ${job.id}`);
-        return;
-      }
-
       const contact = await prisma.user.findUnique({
         where: { id: senderId },
         select: { username: true, isBot: true },
@@ -106,17 +96,89 @@ export function startAutoMessengerWorker() {
         where: { chatId_userId: { chatId, userId: senderId } },
       });
 
+      // ── PHASE 5: Auto-reply to new chat requests (pre-acceptance) ──
+      // If contact hasn't accepted the chat yet, send a greeting auto-reply (even if AI is OFF)
       if (contactParticipant && !contactParticipant.hasAccepted) {
-        const io = getIO();
-        io.to(chatId).emit('typing_start', { chatId, userId: ownerId });
-        await sleep(2000);
-        io.to(chatId).emit('typing_stop', { chatId, userId: ownerId });
-        await sendAIMessage(ownerId, chatId, "I'm in offline mode. Once I'm back online, I'll get back to you soon 🙂", {
-          personality: config.personality,
-          source: 'OFFLINE',
-        });
+        try {
+          // Get or create pending chat reply config for owner
+          let pendingReply = await prisma.pendingChatReply.findUnique({
+            where: { userId: ownerId },
+          });
+
+          // Create default on first encounter
+          if (!pendingReply) {
+            pendingReply = await prisma.pendingChatReply.create({
+              data: {
+                userId: ownerId,
+                message: "Hey! 👋 Thanks for reaching out. The boss will get back to you soon!",
+              },
+            });
+          }
+
+          // Check if greeting was already sent for this chat (idempotency)
+          const existingGreeting = await prisma.message.findFirst({
+            where: {
+              chatId,
+              senderId: ownerId,
+              isAI: true,
+              content: pendingReply.message,
+              createdAt: {
+                gte: new Date(Date.now() - 24 * 60 * 60 * 1000), // Within last 24 hours
+              },
+            },
+          });
+
+          if (!existingGreeting) {
+            const io = getIO();
+            io.to(chatId).emit('typing_start', { chatId, userId: ownerId });
+            await sleep(1500);
+            io.to(chatId).emit('typing_stop', { chatId, userId: ownerId });
+
+            const sentMessage = await sendAIMessage(ownerId, chatId, pendingReply.message, {
+              personality: 'FRIENDLY',
+              source: 'PENDING_GREETING',
+            });
+
+            if (sentMessage) {
+              await prisma.aIMessageLog.create({
+                data: {
+                  userId: ownerId,
+                  chatId,
+                  messageId: sentMessage.id,
+                  incomingMsg: content,
+                  aiReply: pendingReply.message,
+                  riskType: 'SAFE' as any,
+                  confidence: 1,
+                  wasAutoSent: true,
+                  personality: 'FRIENDLY',
+                  processingMs: Date.now() - startedAt,
+                  source: 'PENDING_GREETING',
+                },
+              });
+            }
+          }
+
+          console.log(`[AutoMessenger] Pending greeting sent or already exists for ${chatId}`);
+          return;
+        } catch (err) {
+          console.error('[AutoMessenger] Failed to send pending greeting:', (err as Error).message);
+          return;
+        }
+      }
+
+      const config = await prisma.autoMessengerConfig.findUnique({
+        where: { id: configId },
+        include: { user: { select: { username: true } } },
+      });
+
+      if (!config || !config.isEnabled) {
+        console.log(`[AutoMessenger] Config disabled or missing — skipping job ${job.id}`);
         return;
       }
+
+      // ── PHASE 10: VIP Contacts — always ask for approval ──
+      const vipContacts = config.vipContacts as string[] || [];
+      const isVIP = vipContacts.includes(contact.username);
 
       if (contact.isBot) {
         console.log(`[AutoMessenger] Sender is a bot — skipping to prevent loop`);
@@ -227,7 +289,8 @@ export function startAutoMessengerWorker() {
         customPrompt: enhancedPrompt,
       });
 
-      if (result.needsApproval) {
+      // VIP contacts always need approval
+      if (isVIP || result.needsApproval) {
         const approval = await prisma.approvalRequest.create({
           data: {
             configId,
@@ -249,13 +312,13 @@ export function startAutoMessengerWorker() {
         await sendAIMessage(ownerId, chatId, result.reply, {
           personality: config.personality,
           languageVariant: result.languageVariant,
-          source: 'HOLDING',
+          source: isVIP ? 'VIP_HOLD' : 'HOLDING',
           confidence: result.confidence,
         });
 
         await notificationQueue.add('send-push', {
           userId: ownerId,
-          title: `⚠️ Approval Needed — ${getRiskLabel(result.classification.risk)}`,
+          title: `⚠️ Approval Needed — ${isVIP ? 'VIP Contact' : getRiskLabel(result.classification.risk)}`,
           body: `${contact.username}: "${content.slice(0, 60)}"`,
           data: { type: 'APPROVAL_REQUEST', chatId, approvalId: approval.id },
         });
@@ -270,6 +333,7 @@ export function startAutoMessengerWorker() {
             riskType: result.classification.risk,
             confidence: result.confidence,
             expiresAt: approval.expiresAt,
+            isVIP,
           });
         } catch { /* ignore */ }
 
@@ -285,7 +349,7 @@ export function startAutoMessengerWorker() {
             personality: config.personality,
             language: result.languageVariant,
             processingMs: Date.now() - startedAt,
-            source: 'HOLDING',
+            source: isVIP ? 'VIP_HOLD' : 'HOLDING',
           },
         });
 

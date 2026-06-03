@@ -77,12 +77,22 @@ export class MessageRepository {
 
   async toggleReaction(messageId: string, userId: string, emoji: string) {
     const existing = await prisma.reaction.findUnique({
-      where: { messageId_userId_emoji: { messageId, userId, emoji } }
+      where: { messageId_userId: { messageId, userId } }
     });
 
     if (existing) {
-      await prisma.reaction.delete({ where: { id: existing.id } });
+      // If same emoji: remove reaction
+      if (existing.emoji === emoji) {
+        await prisma.reaction.delete({ where: { id: existing.id } });
+      } else {
+        // If different emoji: update to new emoji
+        await prisma.reaction.update({
+          where: { id: existing.id },
+          data: { emoji }
+        });
+      }
     } else {
+      // No existing reaction: create new one
       await prisma.reaction.create({ data: { messageId, userId, emoji } });
     }
 

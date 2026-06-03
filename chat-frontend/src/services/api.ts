@@ -67,12 +67,19 @@ api.interceptors.response.use(
           refreshToken,
         });
 
-        localStorage.setItem('accessToken', data.accessToken);
-        localStorage.setItem('refreshToken', data.refreshToken);
-        store.dispatch(updateToken(data.accessToken));
+        const newAccessToken = data.accessToken;
+        const newRefreshToken = data.refreshToken;
+
+        localStorage.setItem('accessToken', newAccessToken);
+        localStorage.setItem('refreshToken', newRefreshToken);
+        store.dispatch(updateToken(newAccessToken));
 
         // Update the original request's auth header and retry
-        originalRequest.headers.Authorization = `Bearer ${data.accessToken}`;
+        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+        
+        // ✅ Reconnect socket with new token (emit custom event for socket to listen)
+        window.dispatchEvent(new CustomEvent('tokenRefreshed', { detail: { token: newAccessToken } }));
+
         return api(originalRequest);
       } catch (refreshError) {
         console.error('Refresh token failed, logging out...');

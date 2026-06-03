@@ -31,6 +31,12 @@
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   background-color: rgba(255, 255, 255, 0.02);
+  transition: all 0.2s;
+}
+
+.search-modal-header:has(.search-modal-input:focus) {
+  border-bottom-color: var(--accent);
+  background-color: rgba(255, 255, 255, 0.04);
 }
 
 .search-icon {
@@ -45,10 +51,15 @@
   color: var(--text-primary);
   font-size: 15px;
   outline: none;
+  transition: all 0.2s;
 }
 
 .search-modal-input::placeholder {
   color: var(--text-secondary);
+}
+
+.search-modal-input:focus {
+  color: var(--accent);
 }
 
 .search-modal-close {

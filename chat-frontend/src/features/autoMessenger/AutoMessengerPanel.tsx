@@ -189,24 +189,46 @@ export default function AutoMessengerPanel({ chatId, token, apiBase = '/api', so
   };
 
   const addAutoReply = async () => {
-    if (!newRule.triggerValue || (newRule.responseType === 'FIXED' && !newRule.fixedResponse?.trim())) {
+    // Validation
+    if (!newRule.triggerValue?.trim()) {
+      alert('Please enter a trigger value');
       return;
     }
+    if (newRule.responseType === 'FIXED' && !newRule.fixedResponse?.trim()) {
+      alert('Please enter a response message');
+      return;
+    }
+    
     setSaving(true);
     try {
       const res = await fetch(`${apiBase}/auto-messenger/${chatId}/rules`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(newRule),
+        body: JSON.stringify({
+          triggerType: newRule.triggerType || 'KEYWORD',
+          triggerValue: newRule.triggerValue?.trim(),
+          responseType: newRule.responseType || 'FIXED',
+          fixedResponse: newRule.responseType === 'FIXED' ? newRule.fixedResponse?.trim() : undefined,
+          aiPromptEnhancement: newRule.responseType === 'AI_ENHANCED' ? newRule.aiPromptEnhancement?.trim() : undefined,
+          priority: newRule.priority || 5,
+          enabled: newRule.enabled !== false,
+        }),
       });
-      if (res.ok) {
-        const rule = await res.json();
-        setAutoReplies((prev) => [...prev, rule]);
-        setNewRule({ triggerType: 'KEYWORD', responseType: 'FIXED', priority: 5, enabled: true });
-        setShowNewRuleForm(false);
+      
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || `HTTP ${res.status}: Failed to create rule`);
       }
-    } catch (err) {
+      
+      const rule = await res.json();
+      setAutoReplies((prev) => [...prev, rule]);
+      setNewRule({ triggerType: 'KEYWORD', responseType: 'FIXED', priority: 5, enabled: true });
+      setShowNewRuleForm(false);
+      // Success feedback
+      console.log('Rule created successfully:', rule);
+    } catch (err: any) {
       console.error('AutoMessenger: failed to add rule', err);
+      alert(`Failed to create rule: ${err.message}`);
     } finally {
       setSaving(false);
     }
@@ -484,9 +506,9 @@ export default function AutoMessengerPanel({ chatId, token, apiBase = '/api', so
                 type="button"
                 className="am-btn am-btn--approve"
                 onClick={addAutoReply}
-                disabled={saving}
+                disabled={saving || !newRule.triggerValue?.trim() || (newRule.responseType === 'FIXED' && !newRule.fixedResponse?.trim())}
               >
-                Create Rule
+                {saving ? '⏳ Creating...' : 'Create Rule'}
               </button>
             </div>
           )}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useLayoutEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAppDispatch, useAppSelector } from '../store/store';
@@ -11,20 +11,32 @@ import { CreateGroupModal } from '../components/modals/CreateGroupModal';
 import { GroupDetailsModal } from '../components/modals/GroupDetailsModal';
 import { SettingsModal } from '../components/modals/SettingsModal';
 import { TranslateModal } from '../components/modals/TranslateModal';
+import { AIPanelBox } from '../components/panels/AIPanelBox';
 import { EmptyChatState } from '../components/ui/EmptyChatState';
+import { EmojiPicker } from '../components/ui/EmojiPicker';
+
+import { AutoToast, useAutoToast } from '../components/ui/AutoToast';
+import { AvatarEmotions } from '../components/ui/AvatarEmotions';
+import { UnreadGlowPulse } from '../components/ui/UnreadGlowPulse';
+import { ChatBackgroundLottie } from '../components/ui/ChatBackgroundLottie';
+// Disabled for performance: ripples and energy transfers
+// import { useMessageRipple } from '../components/ui/MessageRipple';
+// import { useEnergyTransfer } from '../components/ui/EnergyTransfer';
+import { useEmojiScatter } from '../components/ui/EmojiScatterAnimation';
+import { useFriendCelebration } from '../components/ui/FriendCelebration';
+import ReadyPlayerBitmoji from '../components/ui/ReadyPlayerBitmoji';
 import { useAlert } from '../contexts/AlertContext';
 import api, { getMediaUrl } from '../services/api';
-import EmojiPicker, { Theme } from 'emoji-picker-react';
 import AutoMessengerPanel from '../features/autoMessenger/AutoMessengerPanel';
 import './Dashboard.css';
 import {
-  Menu, Search, Home, Plus, MessageSquare, Users, Hash,
-  Clock, Pin, Mail, Bell, Bot, Settings, User, LogOut,
-  Archive, Bookmark, UserPlus, BookUser, Radio, BellRing,
-  PanelLeftClose, PanelLeftOpen, Command, CheckSquare,
+  Menu, Search, Home, Plus, MessageSquare, Users,
+  Clock, Pin, Mail, Bell, BellRing, Bot, User, LogOut,
+  Archive, Bookmark, UserPlus,
+  PanelLeftClose, PanelLeftOpen,
   MoreVertical, Paperclip, Image, Smile, Send,
-  ShieldCheck, Trash2, Ban, Flag, ChevronDown, ChevronRight,
-  Check, CheckCheck, Edit3, Reply, X, ArrowLeft, BellOff, Languages
+  ShieldCheck, Trash2, Ban, ChevronDown, ChevronRight,
+  Check, CheckCheck, Edit3, Reply, X, ArrowLeft, BellOff, Languages, Copy
 } from 'lucide-react';
 
 export const HomePage = () => {
@@ -33,6 +45,28 @@ export const HomePage = () => {
   const { showAlert, showConfirm } = useAlert();
   const { user } = useAppSelector(state => state.auth);
   const { chats, activeChatId, isMessagesLoading, typingUsers } = useAppSelector(state => state.chat);
+
+  // Animation hooks
+  const { triggerScatter, renderAnimations: renderEmojiAnimations } = useEmojiScatter();
+  const { celebrate, renderCelebrations } = useFriendCelebration();
+  // Disabled for performance: ripples and energy transfers
+  // const { triggerRipple, renderRipples } = useMessageRipple();
+  // const { triggerTransfer, renderTransfers } = useEnergyTransfer();
+  const { showToast } = useAutoToast();
+
+  // Handle AI panel reply selection
+  const handleAIPanelReplySelect = (reply: string) => {
+    setMessageText(reply);
+    setAIPanelMessageId(null);
+    // Focus input
+    setTimeout(() => {
+      (document.querySelector('.chat-text-input') as HTMLTextAreaElement | null)?.focus();
+    }, 100);
+  };
+
+  // Bitmoji state based on user activity
+  const [bitmojiState, setBitmojiState] = useState<'idle' | 'typing' | 'recording' | 'thinking' | 'happy' | 'listening' | 'excited' | 'walking'>('idle');
+  const [inputFocused, setInputFocused] = useState(false);
 
   const activeChatTypingUsers = (activeChatId ? typingUsers[activeChatId] : []) || [];
   const otherTypingUsers = activeChatTypingUsers.filter(id => id !== user?.id);
@@ -69,13 +103,23 @@ export const HomePage = () => {
   // Modals state
   // Modals state
   const [chatToDelete, setChatToDelete] = useState<string | null>(null);
+  const [isClearingChat, setIsClearingChat] = useState(false);
   const [userToBlock, setUserToBlock] = useState<string | null>(null);
   const [messageToDelete, setMessageToDelete] = useState<string | null>(null);
+  const [deleteOption, setDeleteOption] = useState<'me' | 'everyone' | null>(null);
+  const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+  const [isBackgroundAnimationEnabled, setIsBackgroundAnimationEnabled] = useState(true);
+  const [aiPanelMessageId, setAIPanelMessageId] = useState<string | null>(null);
   const [messageText, setMessageText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showReactionEmojiPicker, setShowReactionEmojiPicker] = useState(false);
+  const [reactionEmojiPickerMessageId, setReactionEmojiPickerMessageId] = useState<string | null>(null);
+  const [reactionEmojiPickerPosition, setReactionEmojiPickerPosition] = useState({ top: 0, left: 0 });
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [replyingToMessage, setReplyingToMessage] = useState<Message | null>(null);
   const [showNewMessageIndicator, setShowNewMessageIndicator] = useState(false);
+  const [lastSelectedMessageId, setLastSelectedMessageId] = useState<string | null>(null);
 
   // Translation States
   const [showOriginalForMsg, setShowOriginalForMsg] = useState<Record<string, boolean>>({});
@@ -83,8 +127,6 @@ export const HomePage = () => {
   const [liveTranslateTargetLang, setLiveTranslateTargetLang] = useState('en');
   const [isTranslatingLive, setIsTranslatingLive] = useState(false);
   const [liveTranslateError, setLiveTranslateError] = useState<string | null>(null);
-  const liveTranslateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const liveTranslateVersionRef = useRef(0);
   const [translatingMsgId, setTranslatingMsgId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -97,6 +139,16 @@ export const HomePage = () => {
   const handleTyping = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newText = e.target.value;
     setMessageText(newText);
+
+    // Update bitmoji state based on typing
+    if (newText.trim().length > 0) {
+      setBitmojiState('typing'); // Run animation while typing
+    } else if (inputFocused) {
+      setBitmojiState('walking'); // Walk animation when cursor blinking in empty input
+    } else {
+      setBitmojiState('idle');
+    }
+
     e.target.style.height = 'auto';
     e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
 
@@ -106,6 +158,7 @@ export const HomePage = () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = setTimeout(() => {
         socket.emit('typing_stop', activeChatId);
+        setBitmojiState('idle');
       }, 2000);
     }
   };
@@ -228,33 +281,63 @@ export const HomePage = () => {
   }, [activeTab]);
 
   const previousChatIdRef = useRef<string | null>(null);
+  const messageCountRef = useRef(0);
 
-  useEffect(() => {
-    if (chatFeedRef.current && messagesEndRef.current) {
-      const feed = chatFeedRef.current;
-      const isChatChanged = previousChatIdRef.current !== activeChatId;
-      const isNearBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 150;
-      const lastMessage = currentMessages?.[currentMessages.length - 1];
-      const isMyMessage = lastMessage?.senderId === user?.id;
-
-      if (isChatChanged || isNearBottom || isMyMessage) {
-        messagesEndRef.current.scrollIntoView({ behavior: isChatChanged ? 'auto' : 'smooth' });
-        setShowNewMessageIndicator(false);
-      } else {
-        setShowNewMessageIndicator(true);
-      }
-
-      previousChatIdRef.current = activeChatId;
+  // Scroll to bottom on component mount
+  useLayoutEffect(() => {
+    if (chatFeedRef.current && currentMessages && currentMessages.length > 0) {
+      chatFeedRef.current.scrollTop = chatFeedRef.current.scrollHeight;
     }
-  }, [currentMessages, activeChatId, user?.id]);
+  }, []);
+
+  // Scroll to bottom when chat changes
+  useEffect(() => {
+    const isChatChanged = previousChatIdRef.current !== activeChatId;
+
+    if (isChatChanged && activeChatId) {
+      previousChatIdRef.current = activeChatId;
+
+      // Immediate scroll using requestAnimationFrame
+      requestAnimationFrame(() => {
+        if (chatFeedRef.current) {
+          chatFeedRef.current.scrollTop = chatFeedRef.current.scrollHeight;
+        }
+      });
+
+      setShowNewMessageIndicator(false);
+    }
+  }, [activeChatId]);
+
+  // Scroll when new messages arrive and user is at bottom
+  useEffect(() => {
+    if (!chatFeedRef.current || !currentMessages) return;
+
+    const feed = chatFeedRef.current;
+    const isNearBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 150;
+    const lastMessage = currentMessages?.[currentMessages.length - 1];
+    const isMyMessage = lastMessage?.senderId === user?.id;
+
+    // Auto-scroll if near bottom or I sent the message
+    if (isNearBottom || isMyMessage) {
+      requestAnimationFrame(() => {
+        if (chatFeedRef.current) {
+          chatFeedRef.current.scrollTop = chatFeedRef.current.scrollHeight;
+        }
+      });
+      setShowNewMessageIndicator(false);
+    }
+
+    messageCountRef.current = currentMessages.length;
+  }, [currentMessages, user?.id]);
 
   const handleScroll = () => {
-    if (chatFeedRef.current) {
-      const feed = chatFeedRef.current;
-      const isNearBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 50;
-      if (isNearBottom) {
-        setShowNewMessageIndicator(false);
-      }
+    if (!chatFeedRef.current) return;
+
+    const feed = chatFeedRef.current;
+    const isNearBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 100;
+
+    if (isNearBottom) {
+      setShowNewMessageIndicator(false);
     }
   };
 
@@ -268,6 +351,17 @@ export const HomePage = () => {
     }
   }, [activeChatId, currentMessages, socket, user?.id]);
 
+  // Sync animation state with other user via socket
+  useEffect(() => {
+    if (socket && activeChatId) {
+      socket.emit('animation_state_changed', {
+        chatId: activeChatId,
+        isEnabled: isBackgroundAnimationEnabled,
+        userId: user?.id
+      });
+    }
+  }, [isBackgroundAnimationEnabled, activeChatId, socket, user?.id]);
+
   const handleSendMessage = async () => {
     if (!messageText.trim() || !activeChatId || !user) return;
 
@@ -277,9 +371,13 @@ export const HomePage = () => {
     const editId = editingMessageId;
 
     setMessageText('');
+    setBitmojiState('happy');
     setShowEmojiPicker(false);
     setEditingMessageId(null);
     setReplyingToMessage(null);
+
+    // Auto return to idle after 1 second
+    setTimeout(() => setBitmojiState('idle'), 1000);
 
     if (socket && activeChatId) {
       socket.emit('typing_stop', activeChatId);
@@ -334,19 +432,104 @@ export const HomePage = () => {
   };
 
   const handleDeleteMessage = async (messageId: string) => {
-    setMessageToDelete(messageId);
+    const msg = currentMessages?.find(m => m.id === messageId);
+    if (msg?.sender?.id === user?.id) {
+      // Outgoing message - show options (Delete for Me / Delete for Everyone)
+      setMessageToDelete(messageId);
+      setDeleteOption(null); // Show options modal
+    } else {
+      // Incoming message - only delete for me
+      setMessageToDelete(messageId);
+      setDeleteOption('me');
+    }
   };
 
-  const confirmDeleteMessage = async () => {
+  const confirmDeleteMessage = async (option: 'me' | 'everyone') => {
     if (!messageToDelete || !activeChatId) return;
     const id = messageToDelete;
     setMessageToDelete(null);
+    setDeleteOption(null);
+    
     // Optimistic update immediately
     dispatch(deleteMessageInStore({ chatId: activeChatId, messageId: id }));
     try {
-      await api.delete(`/chats/${activeChatId}/messages/${id}`);
+      // Pass delete option to API (deleteFor: 'me' or 'everyone')
+      await api.delete(`/chats/${activeChatId}/messages/${id}`, {
+        params: { deleteFor: option }
+      });
     } catch (err) {
       console.error('Failed to delete message', err);
+      // Revert on failure
+      dispatch(fetchMessages({ chatId: activeChatId } as any));
+    }
+  };
+
+  const handleSelectMessage = (messageId: string, isShiftClick: boolean = false) => {
+    // Activate multi-select mode if not already active
+    if (!isMultiSelectMode) {
+      setIsMultiSelectMode(true);
+    }
+
+    const newSelected = new Set(selectedMessages);
+
+    // Shift+Click for range selection
+    if (isShiftClick && lastSelectedMessageId && lastSelectedMessageId !== messageId) {
+      const messageIds = filteredMessages.map(m => m.id);
+      const lastIndex = messageIds.indexOf(lastSelectedMessageId);
+      const currentIndex = messageIds.indexOf(messageId);
+
+      if (lastIndex !== -1 && currentIndex !== -1) {
+        const start = Math.min(lastIndex, currentIndex);
+        const end = Math.max(lastIndex, currentIndex);
+
+        // Select all messages in range
+        for (let i = start; i <= end; i++) {
+          newSelected.add(messageIds[i]);
+        }
+      }
+    } else {
+      // Regular toggle
+      if (newSelected.has(messageId)) {
+        newSelected.delete(messageId);
+      } else {
+        newSelected.add(messageId);
+      }
+    }
+
+    setSelectedMessages(newSelected);
+    setLastSelectedMessageId(messageId);
+
+    // Auto-exit multi-select if all messages are deselected
+    if (newSelected.size === 0) {
+      setIsMultiSelectMode(false);
+    }
+  };
+
+  const handleDeleteSelectedMessages = async () => {
+    if (selectedMessages.size === 0 || !activeChatId) return;
+
+    try {
+      // Delete locally first (optimistic)
+      Array.from(selectedMessages).forEach(msgId => {
+        dispatch(deleteMessageInStore({ chatId: activeChatId, messageId: msgId }));
+      });
+
+      showToast(`${selectedMessages.size} message${selectedMessages.size !== 1 ? 's' : ''} deleted`);
+
+      // Delete from server
+      await Promise.all(
+        Array.from(selectedMessages).map(msgId =>
+          api.delete(`/chats/${activeChatId}/messages/${msgId}`)
+        )
+      );
+
+      // Exit multi-select mode after successful deletion
+      setSelectedMessages(new Set());
+      setIsMultiSelectMode(false);
+      setLastSelectedMessageId(null);
+    } catch (err) {
+      console.error('Failed to delete messages', err);
+      showToast('Failed to delete messages');
       // Revert on failure
       dispatch(fetchMessages({ chatId: activeChatId } as any));
     }
@@ -554,6 +737,9 @@ export const HomePage = () => {
 
   return (
     <div className="v2-dashboard">
+      {/* Auto-Dismissing Toast Notifications */}
+      <AutoToast />
+      
       {/* ── TOP NAVBAR ── */}
       <nav className="v2-navbar">
         <div className="nav-left">
@@ -651,71 +837,72 @@ export const HomePage = () => {
                         <div className="sidebar-sublist">
                           {categoryChats.map(chat => {
                             return (
-                              <div
-                                key={chat.id}
-                                style={{ position: 'relative' }}
-                                className={`sidebar-subitem ${activeChatId === chat.id ? 'active' : ''}`}
-                                onClick={() => dispatch(setActiveChat(chat.id))}
-                              >
-                                {(() => {
-                                  const isPrivate = chat.type === 'PRIVATE';
-                                  const otherUserId = isPrivate ? chat.participants.find(p => p.userId !== user?.id)?.userId : null;
-                                  const isFriend = otherUserId ? contacts.some(c => c.contactId === otherUserId) : false;
+                              <UnreadGlowPulse key={chat.id} unreadCount={chat.unreadCount} size="medium">
+                                <div
+                                  style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '10px' }}
+                                  className={`sidebar-subitem ${activeChatId === chat.id ? 'active' : ''}`}
+                                  onClick={() => dispatch(setActiveChat(chat.id))}
+                                >
+                                  {(() => {
+                                    const isPrivate = chat.type === 'PRIVATE';
+                                    const otherUserId = isPrivate ? chat.participants.find(p => p.userId !== user?.id)?.userId : null;
+                                    const isFriend = otherUserId ? contacts.some(c => c.contactId === otherUserId) : false;
 
-                                  return (
-                                    <div className="subitem-avatar" style={{
-                                      overflow: 'hidden',
-                                      padding: 0,
-                                      backgroundColor: 'var(--accent)',
-                                      border: isFriend ? '2px solid lightpink' : 'none'
-                                    }}>
-                                      {getChatAvatarUrl(chat) ? (
-                                        <img src={getChatAvatarUrl(chat)!} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                      ) : (
-                                        getChatAvatar(chat)
-                                      )}
-                                    </div>
-                                  );
-                                })()}
-                                <div className="subitem-content" style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0 }}>
-                                    <span className="subitem-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                      {getChatName(chat)}
-                                    </span>
-                                    {chat.isMuted && <BellOff size={12} strokeWidth={2} style={{ flexShrink: 0, opacity: 0.5, color: 'var(--text-secondary)' }} />}
-                                    {chat.type === 'PRIVATE' && <ShieldCheck size={12} className="verified-badge" />}
-                                    {chat.isPinned && <Pin size={10} fill="currentColor" color="var(--color-text-dim)" style={{ flexShrink: 0 }} />}
-                                  </div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    {item.id === 'requests' && <span className="subitem-badge new">New</span>}
-                                    {chat.unreadCount ? (
-                                      <span style={{
+                                    return (
+                                      <div className="subitem-avatar" style={{
+                                        overflow: 'hidden',
+                                        padding: 0,
                                         backgroundColor: 'var(--accent)',
-                                        color: '#fff',
-                                        fontSize: '10px',
-                                        padding: '2px 6px',
-                                        borderRadius: '10px',
-                                        fontWeight: 'bold'
+                                        border: isFriend ? '2px solid lightpink' : 'none'
                                       }}>
-                                        {chat.unreadCount}
+                                        {getChatAvatarUrl(chat) ? (
+                                          <img src={getChatAvatarUrl(chat)!} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                        ) : (
+                                          getChatAvatar(chat)
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+                                  <div className="subitem-content" style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0 }}>
+                                      <span className="subitem-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        {getChatName(chat)}
                                       </span>
-                                    ) : null}
-                                    <div className="chat-hover-actions" style={{ position: 'relative', display: 'flex', gap: '4px' }}>
-                                      <button
-                                        className="chat-hover-actions-btn"
-                                        style={{ background: dropdownConfig?.id === chat.id ? 'var(--surface)' : 'none', border: 'none', cursor: 'pointer', padding: '2px', borderRadius: '4px', color: 'var(--color-text-dim)' }}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          const rect = e.currentTarget.getBoundingClientRect();
-                                          setDropdownConfig(dropdownConfig?.id === chat.id ? null : { id: chat.id, x: rect.right, y: rect.bottom, itemType: item.id });
-                                        }}
-                                      >
-                                        <MoreVertical size={14} />
-                                      </button>
+                                      {chat.isMuted && <BellOff size={12} strokeWidth={2} style={{ flexShrink: 0, opacity: 0.5, color: 'var(--text-secondary)' }} />}
+                                      {chat.type === 'PRIVATE' && <ShieldCheck size={12} className="verified-badge" />}
+                                      {chat.isPinned && <Pin size={10} fill="currentColor" color="var(--color-text-dim)" style={{ flexShrink: 0 }} />}
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                      {item.id === 'requests' && <span className="subitem-badge new">New</span>}
+                                      {chat.unreadCount ? (
+                                        <span style={{
+                                          backgroundColor: 'var(--accent)',
+                                          color: '#fff',
+                                          fontSize: '10px',
+                                          padding: '2px 6px',
+                                          borderRadius: '10px',
+                                          fontWeight: 'bold'
+                                        }}>
+                                          {chat.unreadCount}
+                                        </span>
+                                      ) : null}
+                                      <div className="chat-hover-actions" style={{ position: 'relative', display: 'flex', gap: '4px' }}>
+                                        <button
+                                          className="chat-hover-actions-btn"
+                                          style={{ background: dropdownConfig?.id === chat.id ? 'var(--surface)' : 'none', border: 'none', cursor: 'pointer', padding: '2px', borderRadius: '4px', color: 'var(--color-text-dim)' }}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const rect = e.currentTarget.getBoundingClientRect();
+                                            setDropdownConfig(dropdownConfig?.id === chat.id ? null : { id: chat.id, x: rect.right, y: rect.bottom, itemType: item.id });
+                                          }}
+                                        >
+                                          <MoreVertical size={14} />
+                                        </button>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
-                              </div>
+                              </UnreadGlowPulse>
                             );
                           })}
                         </div>
@@ -741,7 +928,15 @@ export const HomePage = () => {
           {activeChatData ? (
             <>
               {/* Dynamic Header */}
-              <header className="chat-header">
+              <header
+                className="chat-header"
+                onClick={(e) => {
+                  // Close dropdown if clicking outside of it
+                  if (showOptionsPopup && !(e.target as HTMLElement).closest('.dropdown-container')) {
+                    setShowOptionsPopup(false);
+                  }
+                }}
+              >
                 <div className="chat-header-left">
                   <button className="mobile-back-btn" onClick={() => { dispatch(setActiveChat(null)); setActiveTab('home'); }}>
                     <ArrowLeft size={20} />
@@ -769,9 +964,15 @@ export const HomePage = () => {
                       ) : activeChatData.type === 'PRIVATE' ? (() => {
                         const otherP = activeChatData.participants.find(p => p.userId !== user?.id);
                         const isOnline = otherP?.user?.status === 'ONLINE';
+
+                        const getLastSeenText = () => {
+                          if (isOnline) return 'Online';
+                          return 'Offline';
+                        };
+
                         return (
                           <>
-                            <span className={`status-text ${isOnline ? 'online' : 'offline'}`}>{isOnline ? 'Online' : 'Offline'}</span>
+                            <span className={`status-text ${isOnline ? 'online' : 'offline'}`}>{getLastSeenText()}</span>
                             <span className={`status-dot ${isOnline ? 'online' : 'offline'}`}></span>
                           </>
                         );
@@ -852,6 +1053,16 @@ export const HomePage = () => {
                                 } else {
                                   const res = await api.post('/contacts', { contactId: otherUserId });
                                   setContacts(prev => [...prev, res.data]);
+
+                                  // Trigger friend celebration animation
+                                  const otherParticipant = activeChatData?.participants.find(p => p.userId === otherUserId);
+                                  if (otherParticipant) {
+                                    celebrate(
+                                      otherUserId,
+                                      otherParticipant.user.fullName || otherParticipant.user.username,
+                                      getMediaUrl(otherParticipant.user.avatarUrl) || undefined
+                                    );
+                                  }
                                 }
                                 setShowOptionsPopup(false);
                               } catch (err) {
@@ -873,6 +1084,20 @@ export const HomePage = () => {
                           }
                         }}>
                           <Ban size={14} /> Block User
+                        </button>
+                        <div className="dropdown-divider"></div>
+                        <button onClick={() => {
+                          setIsMultiSelectMode(true);
+                          setShowOptionsPopup(false);
+                        }}>
+                          <CheckCheck size={14} /> Select Messages
+                        </button>
+                        <div className="dropdown-divider"></div>
+                        <button onClick={() => {
+                          setIsBackgroundAnimationEnabled(!isBackgroundAnimationEnabled);
+                          setShowOptionsPopup(false);
+                        }} style={{ color: isBackgroundAnimationEnabled ? 'var(--accent)' : 'inherit' }}>
+                          ✨ {isBackgroundAnimationEnabled ? 'Turn Off' : 'Turn On'} Animations
                         </button>
                         <button className="danger-text" onClick={() => setChatToDelete(activeChatData.id)}><Trash2 size={14} /> Clear Chat History</button>
                       </div>
@@ -900,6 +1125,10 @@ export const HomePage = () => {
 
               {/* Feed */}
               <div ref={chatFeedRef} onScroll={handleScroll} className="chat-feed" style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto', position: 'relative' }}>
+                {/* Background Animations */}
+                {activeChatId && (
+                  <ChatBackgroundLottie isEnabled={isBackgroundAnimationEnabled} />
+                )}
                 {isMessagesLoading ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '20px' }}>
                     <div className="skeleton-bubble" style={{ width: '40%', height: '40px', alignSelf: 'flex-start', borderRadius: '12px' }}></div>
@@ -908,16 +1137,53 @@ export const HomePage = () => {
                   </div>
                 ) : filteredMessages?.length > 0 ? (
                   filteredMessages.map((msg: Message, index: number) => {
-                    const isOutgoing = msg.senderId === user?.id && !msg.isAI;
+                    const isOutgoing = msg.senderId === user?.id;
+                    const showAIBadge = msg.isAI && msg.senderId === user?.id;
                     const prevMsg = index > 0 ? filteredMessages[index - 1] : null;
                     const isConsecutive = prevMsg && prevMsg.senderId === msg.senderId && prevMsg.isAI === msg.isAI && (new Date(msg.createdAt).getTime() - new Date(prevMsg.createdAt).getTime() < 5 * 60 * 1000) && (new Date(msg.createdAt).toDateString() === new Date(prevMsg.createdAt).toDateString());
 
                     return (
-                      <div key={msg.id} style={{ display: 'flex', flexDirection: 'column' }}>
+                      <motion.div
+                        key={msg.id}
+                        initial={msg.id.startsWith('temp-') ? { opacity: 0, scale: 0.95 } : { opacity: 1, scale: 1 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.3, ease: 'easeOut' }}
+                        style={{ display: 'flex', flexDirection: 'column' }}
+                      >
                         {renderDateDivider(msg.createdAt, prevMsg?.createdAt || null)}
-                        <div className={`message-row ${isOutgoing ? 'outgoing' : 'incoming'} ${msg.id.startsWith('temp-') ? 'optimistic' : ''}`} style={{ marginTop: isConsecutive ? '-12px' : '0' }}>
+                        <div
+                          className={`message-row ${isOutgoing ? 'outgoing' : 'incoming'} ${msg.id.startsWith('temp-') ? 'optimistic' : ''}`}
+                          style={{
+                            marginTop: isConsecutive ? '-12px' : '0',
+                            position: 'relative',
+                            backgroundColor: selectedMessages.has(msg.id) ? 'rgba(var(--accent-rgb, 123, 108, 255), 0.15)' : 'transparent',
+                            borderRadius: selectedMessages.has(msg.id) ? '8px' : '0px',
+                            padding: selectedMessages.has(msg.id) ? '8px' : '0px',
+                            transition: 'all 0.2s ease'
+                          }}
+                        >
+                          {/* Multi-select Checkbox */}
+                          {isMultiSelectMode && (
+                            <input
+                              type="checkbox"
+                              checked={selectedMessages.has(msg.id)}
+                              onChange={(e) => {
+                                const isShift = (e.nativeEvent as any).shiftKey;
+                                handleSelectMessage(msg.id, isShift);
+                              }}
+                              style={{
+                                position: 'absolute',
+                                left: isOutgoing ? 'auto' : '-28px',
+                                right: isOutgoing ? '-28px' : 'auto',
+                                top: '50%',
+                                transform: 'translateY(-50%)',
+                                cursor: 'pointer',
+                                accentColor: 'var(--accent)'
+                              }}
+                            />
+                          )}
                           {!isOutgoing && (
-                            <div className="message-avatar" style={{ visibility: isConsecutive ? 'hidden' : 'visible', overflow: 'hidden', padding: 0, backgroundColor: msg.isAI ? 'var(--accent)' : 'var(--accent)' }}>
+                            <div className="message-avatar" style={{ visibility: isConsecutive ? 'hidden' : 'visible', overflow: 'hidden', padding: 0, backgroundColor: msg.isAI ? 'var(--accent)' : 'var(--accent)', position: 'relative' }}>
                               {msg.isAI ? (
                                 <span style={{ fontSize: '11px', color: '#fff', fontWeight: 'bold' }}>🤖</span>
                               ) : msg.sender?.avatarUrl ? (
@@ -925,21 +1191,64 @@ export const HomePage = () => {
                               ) : (
                                 <span style={{ fontSize: '11px', color: '#fff' }}>{msg.sender?.username?.substring(0, 2).toUpperCase() || 'U'}</span>
                               )}
+
+                              {/* Avatar Emotion Display - Triggered by emoji reactions */}
+                              {msg.reactions && msg.reactions.length > 0 && (
+                                <div style={{ position: 'absolute', top: '-8px', right: '-8px', zIndex: 10 }}>
+                                  {(() => {
+                                    // Map emoji to emotion type
+                                    const emojiMap: Record<string, 'laugh' | 'love' | 'celebrate' | 'surprise' | 'wave' | 'sleep'> = {
+                                      '😂': 'laugh',
+                                      '❤️': 'love',
+                                      '🎉': 'celebrate',
+                                      '😮': 'surprise',
+                                      '👋': 'wave',
+                                      '😴': 'sleep'
+                                    };
+
+                                    // Get most recent reaction
+                                    const latestReaction = msg.reactions[msg.reactions.length - 1];
+                                    const emotionType = emojiMap[latestReaction.emoji] || 'idle';
+
+                                    return (
+                                      <AvatarEmotions
+                                        initials={msg.sender?.username?.substring(0, 2).toUpperCase()}
+                                        emotion={emotionType}
+                                        duration={2}
+                                        size={28}
+                                      />
+                                    );
+                                  })()}
+                                </div>
+                              )}
                             </div>
                           )}
-                          {msg.isAI && isOutgoing && (
+                          {showAIBadge && (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                              <span style={{ fontSize: '10px', fontWeight: 600, color: '#818cf8', letterSpacing: '0.3px' }}>🤖 AI Reply</span>
+                              <span style={{ fontSize: '10px', fontWeight: 600, color: '#818cf8', letterSpacing: '0.3px' }}>🤖</span>
                             </div>
                           )}
-                          <div className="message-content" style={{ display: 'flex', flexDirection: isOutgoing ? 'row-reverse' : 'row', alignItems: 'center', gap: '8px' }}>
+                          <div 
+                            className="message-content" 
+                            style={{ display: 'flex', flexDirection: isOutgoing ? 'row-reverse' : 'row', alignItems: 'center', gap: '8px', cursor: isMultiSelectMode ? 'pointer' : 'default' }}
+                            onClick={() => {
+                              // In multi-select mode, clicking message selects it
+                              if (isMultiSelectMode) {
+                                handleSelectMessage(msg.id, false);
+                              }
+                            }}
+                          >
                             <div className="bubble" style={{
                               borderTopLeftRadius: !isOutgoing && isConsecutive ? '4px' : '',
                               borderTopRightRadius: isOutgoing && isConsecutive ? '4px' : '',
-                              display: 'inline-flex',
+                              display: 'flex',
                               flexDirection: 'column',
-                              gap: '4px',
-                              maxWidth: '100%'
+                              gap: '8px',
+                              maxWidth: '100%',
+                              position: 'relative',
+                              backgroundColor: aiPanelMessageId === msg.id ? 'rgba(168, 85, 247, 0.15)' : undefined,
+                              borderLeft: aiPanelMessageId === msg.id && !isOutgoing ? '4px solid rgba(168, 85, 247, 0.5)' : undefined,
+                              borderRight: aiPanelMessageId === msg.id && isOutgoing ? '4px solid rgba(168, 85, 247, 0.5)' : undefined,
                             }}>
                               {msg.parentMessage && !msg.isDeleted && (
                                 <div style={{
@@ -960,7 +1269,7 @@ export const HomePage = () => {
                                   </span>
                                 </div>
                               )}
-                              <div style={{ display: 'inline-flex', alignItems: 'flex-end', gap: '8px' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
                                 {(() => {
                                   const translations = msg.translations || {};
                                   const availableLangs = Object.keys(translations);
@@ -972,122 +1281,173 @@ export const HomePage = () => {
                                   const isCurrentlyTranslating = translatingMsgId === msg.id;
 
                                   return (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                      <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'normal', minWidth: 0, opacity: msg.isDeleted ? 0.5 : 1, fontStyle: msg.isDeleted ? 'italic' : 'normal' }}>
-                                        {msg.isDeleted ? '🚫 This message was deleted' : displayContent}
+                                    <>
+                                      <div style={{ display: 'inline-flex', alignItems: 'flex-end', gap: '8px' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                          <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'normal', minWidth: 0, opacity: msg.isDeleted ? 0.5 : 1, fontStyle: msg.isDeleted ? 'italic' : 'normal' }}>
+                                            {msg.isDeleted ? '🚫 This message was deleted' : displayContent}
+                                          </div>
+
+                                          {isCurrentlyTranslating && (
+                                            <div style={{ fontSize: '10px', fontStyle: 'italic', color: isOutgoing ? 'rgba(255,255,255,0.7)' : 'var(--text-secondary)', alignSelf: isOutgoing ? 'flex-end' : 'flex-start' }}>
+                                              translating...
+                                            </div>
+                                          )}
+                                          {hasTranslation && !msg.isDeleted && (
+                                            <button
+                                              onClick={() => setShowOriginalForMsg(prev => ({ ...prev, [msg.id]: !prev[msg.id] }))}
+                                              style={{
+                                                alignSelf: isOutgoing ? 'flex-end' : 'flex-start',
+                                                background: 'none',
+                                                border: 'none',
+                                                padding: 0,
+                                                fontSize: '10px',
+                                                fontWeight: 600,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '4px',
+                                                cursor: 'pointer',
+                                                color: isOutgoing ? 'rgba(255,255,255,0.8)' : 'var(--accent)',
+                                                opacity: 0.8
+                                              }}
+                                            >
+                                              <Languages size={10} /> {showOriginal ? `View Translation (${displayLang})` : 'View Original'}
+                                            </button>
+                                          )}
+                                        </div>
                                       </div>
 
-                                      {isCurrentlyTranslating && (
-                                        <div style={{ fontSize: '10px', fontStyle: 'italic', color: isOutgoing ? 'rgba(255,255,255,0.7)' : 'var(--text-secondary)', alignSelf: isOutgoing ? 'flex-end' : 'flex-start' }}>
-                                          translating...
+                                      {/* Message Meta - Single line (original style) */}
+                                      <div style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        paddingTop: '8px',
+                                        marginTop: '4px',
+                                        fontSize: '9px',
+                                        opacity: 0.8,
+                                        gap: '8px'
+                                      }}>
+                                        {/* Left: Ask with AI */}
+                                        {msg.type === 'TEXT' && !msg.isDeleted && (
+                                          <button
+                                            onClick={() => setAIPanelMessageId(msg.id)}
+                                            disabled={aiPanelMessageId !== null}
+                                            style={{
+                                              background: 'none',
+                                              border: 'none',
+                                              padding: 0,
+                                              fontSize: '9px',
+                                              fontWeight: 600,
+                                              color: aiPanelMessageId === null ? '#a855f7' : '#999',
+                                              cursor: aiPanelMessageId === null ? 'pointer' : 'not-allowed',
+                                              opacity: aiPanelMessageId === null ? 1 : 0.5,
+                                              transition: 'all 0.2s'
+                                            }}
+                                            title="Ask AI to analyze this message"
+                                          >
+                                            Ask with AI
+                                          </button>
+                                        )}
+                                        {msg.type !== 'TEXT' && <div />}
+
+                                        {/* Right: Time + Status */}
+                                        <div style={{
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '3px',
+                                          justifyContent: 'flex-end',
+                                          marginLeft: 'auto'
+                                        }}>
+                                          {msg.isEdited && !msg.isDeleted && <span style={{ fontSize: '8px', fontStyle: 'italic', opacity: 0.7 }}>(e)</span>}
+
+                                          <span className="time">{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+
+                                          {savedMessageIds.has(msg.id) && (
+                                            <span style={{ fontSize: '8px', fontWeight: 600, color: isOutgoing ? 'rgba(255,255,255,0.8)' : 'var(--accent)', padding: '0px 2px', borderRadius: '3px', border: '1px solid currentColor' }}>S</span>
+                                          )}
+                                          {isOutgoing && (
+                                            <span style={{ display: 'flex', alignItems: 'center' }}>
+                                              {msg.id.startsWith('temp-') || msg.status === 'SENT' ? (
+                                                <Check size={12} strokeWidth={2.5} style={{ opacity: 0.7 }} />
+                                              ) : (
+                                                <CheckCheck
+                                                  size={12}
+                                                  strokeWidth={2.5}
+                                                  color={msg.status === 'READ' ? isOutgoing ? 'rgba(255,255,255,0.9)' : '#3b82f6' : 'currentColor'}
+                                                  style={{ opacity: msg.status === 'READ' ? 1 : 0.7 }}
+                                                />
+                                              )}
+                                            </span>
+                                          )}
                                         </div>
-                                      )}
-                                      {hasTranslation && !msg.isDeleted && (
-                                        <button
-                                          onClick={() => setShowOriginalForMsg(prev => ({ ...prev, [msg.id]: !prev[msg.id] }))}
-                                          style={{
-                                            alignSelf: isOutgoing ? 'flex-end' : 'flex-start',
-                                            background: 'none',
-                                            border: 'none',
-                                            padding: 0,
-                                            fontSize: '10px',
-                                            fontWeight: 600,
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '4px',
-                                            cursor: 'pointer',
-                                            color: isOutgoing ? 'rgba(255,255,255,0.8)' : 'var(--accent)',
-                                            opacity: 0.8
-                                          }}
-                                        >
-                                          <Languages size={10} /> {showOriginal ? `View Translation (${displayLang})` : 'View Original'}
-                                        </button>
-                                      )}
-                                    </div>
+                                      </div>
+                                    </>
                                   );
                                 })()}
-                                <div className="message-meta" style={{ flexShrink: 0, opacity: 0.7, fontSize: '10px', display: 'flex', gap: '4px', paddingBottom: '2px', alignItems: 'center' }}>
-                                  {msg.isEdited && !msg.isDeleted && <span style={{ marginRight: '2px', fontSize: '9px', fontStyle: 'italic', opacity: 0.7 }}>(edited)</span>}
-
-                                  <span className="time">{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                  {savedMessageIds.has(msg.id) && (
-                                    <span style={{ fontSize: '9px', fontWeight: 600, color: 'var(--accent)', marginLeft: '2px', padding: '1px 3px', borderRadius: '4px', border: '1px solid var(--accent)' }}>Saved</span>
-                                  )}
-                                  {isOutgoing && (
-                                    <span className="read-receipt" style={{ display: 'flex', alignItems: 'center', marginLeft: '2px' }}>
-                                      {msg.id.startsWith('temp-') || msg.status === 'SENT' ? (
-                                        <Check size={14} strokeWidth={2.5} style={{ opacity: 0.7 }} />
-                                      ) : (
-                                        <CheckCheck
-                                          size={14}
-                                          strokeWidth={2.5}
-                                          color={msg.status === 'READ' ? '#3b82f6' : 'currentColor'}
-                                          style={{ opacity: msg.status === 'READ' ? 1 : 0.7 }}
-                                        />
-                                      )}
-                                    </span>
-                                  )}
-                                </div>
                               </div>
                             </div>
 
-                            {/* Reaction Strip */}
+                            {/* Reaction Strip - Single Emoji Per User */}
                             {msg.reactions && msg.reactions.length > 0 && !msg.isDeleted && (
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px', justifyContent: isOutgoing ? 'flex-end' : 'flex-start' }}>
-                                {Object.entries(
-                                  msg.reactions.reduce<Record<string, { count: number; users: string[]; hasReacted: boolean }>>((acc, r) => {
-                                    if (!acc[r.emoji]) acc[r.emoji] = { count: 0, users: [], hasReacted: false };
-                                    acc[r.emoji].count++;
-                                    acc[r.emoji].users.push(r.user.username);
-                                    if (r.userId === user?.id) acc[r.emoji].hasReacted = true;
-                                    return acc;
-                                  }, {})
-                                ).map(([emoji, data]) => (
-                                  <button
-                                    key={emoji}
-                                    title={data.users.join(', ')}
-                                    onClick={async () => {
-                                      const { data: updated } = await api.post(`/messages/${msg.id}/react`, { emoji });
-                                      dispatch(updateMessageInStore(updated));
-                                    }}
-                                    style={{
-                                      background: data.hasReacted ? 'var(--accent)20' : 'var(--bg-secondary)',
-                                      border: `1px solid ${data.hasReacted ? 'var(--accent)' : 'var(--border)'}`,
-                                      borderRadius: '12px',
-                                      padding: '2px 7px',
-                                      fontSize: '13px',
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '4px',
-                                      color: 'var(--color-text)',
-                                      fontWeight: data.hasReacted ? 600 : 400,
-                                      transition: 'all 0.15s'
-                                    }}
-                                  >
-                                    {emoji} <span style={{ fontSize: '11px' }}>{data.count}</span>
-                                  </button>
-                                ))}
+                                {msg.reactions.map((r, idx) => {
+                                  const hasReacted = r.userId === user?.id;
+                                  return (
+                                    <button
+                                      key={`${msg.id}-${r.userId}-${idx}`}
+                                      title={`${r.user.username} reacted with ${r.emoji}`}
+                                      onClick={async () => {
+                                        try {
+                                          // Trigger scatter animation
+                                          triggerScatter(msg.id, r.emoji);
+                                          const { data: updated } = await api.post(`/messages/${msg.id}/react`, { emoji: r.emoji });
+                                          dispatch(updateMessageInStore(updated));
+                                        } catch (err: any) {
+                                          showAlert('Failed to toggle reaction', 'error');
+                                        }
+                                      }}
+                                      style={{
+                                        background: hasReacted ? 'var(--accent)20' : 'var(--bg-secondary)',
+                                        border: `1px solid ${hasReacted ? 'var(--accent)' : 'var(--border)'}`,
+                                        borderRadius: '12px',
+                                        padding: '2px 7px',
+                                        fontSize: '13px',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        color: 'var(--color-text)',
+                                        fontWeight: hasReacted ? 600 : 400,
+                                        transition: 'all 0.15s'
+                                      }}
+                                    >
+                                      {r.emoji}
+                                    </button>
+                                  );
+                                })}
                               </div>
                             )}
 
                             {/* Hover Actions */}
-                            {!msg.id.startsWith('temp-') && !msg.isDeleted && (
-                              <div className="message-actions" style={{ opacity: 0, display: 'flex', gap: '4px', transition: 'opacity 0.2s' }}>
-                                {/* Quick Reactions */}
-                                {['👍', '❤️', '😂'].map(emoji => (
-                                  <button
-                                    key={emoji}
-                                    title={`React ${emoji}`}
-                                    onClick={async () => {
-                                      const { data: updated } = await api.post(`/messages/${msg.id}/react`, { emoji });
-                                      dispatch(updateMessageInStore(updated));
-                                    }}
-                                    style={{ fontSize: '14px', padding: '0 2px', background: 'none', border: 'none' }}
-                                  >
-                                    {emoji}
-                                  </button>
-                                ))}
+                            {!msg.id.startsWith('temp-') && !msg.isDeleted && !isMultiSelectMode && aiPanelMessageId === null && (
+                              <div className="message-actions" style={{ opacity: 0, display: 'flex', gap: '4px', transition: 'opacity 0.2s', alignItems: 'center' }}>
+                                {/* Emoji Picker Button */}
+                                <button
+                                  title="Add reaction"
+                                  onClick={(e) => {
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    setReactionEmojiPickerMessageId(msg.id);
+                                    setReactionEmojiPickerPosition({
+                                      top: rect.bottom + 8,
+                                      left: rect.left
+                                    });
+                                    setShowReactionEmojiPicker(true);
+                                  }}
+                                  style={{ fontSize: '14px', padding: '0 2px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                                >
+                                  <Smile size={14} />
+                                </button>
                                 {msg.type === 'TEXT' && (
                                   <button title="Translate" onClick={() => setTranslateMessageId(msg.id)}>
                                     <Languages size={14} />
@@ -1115,6 +1475,17 @@ export const HomePage = () => {
                                 }}>
                                   <Bookmark size={14} fill={savedMessageIds.has(msg.id) ? 'currentColor' : 'none'} />
                                 </button>
+                                <button title="Copy to Clipboard" onClick={async () => {
+                                  try {
+                                    await navigator.clipboard.writeText(msg.content || '');
+                                    showAlert('Message copied to clipboard!', 'success');
+                                  } catch (err) {
+                                    console.error('Failed to copy message', err);
+                                    showAlert('Failed to copy message', 'error');
+                                  }
+                                }} style={{ cursor: 'pointer' }}>
+                                  <Copy size={14} />
+                                </button>
                                 {isOutgoing && msg.type === 'TEXT' && (
                                   <button title="Edit" onClick={() => {
                                     setEditingMessageId(msg.id);
@@ -1125,16 +1496,14 @@ export const HomePage = () => {
                                     <Edit3 size={14} />
                                   </button>
                                 )}
-                                {isOutgoing && (
-                                  <button title="Delete" onClick={() => handleDeleteMessage(msg.id)} style={{ color: 'var(--danger)' }}>
-                                    <Trash2 size={14} />
-                                  </button>
-                                )}
+                                <button title="Delete" onClick={() => handleDeleteMessage(msg.id)} style={{ color: 'var(--danger)' }}>
+                                  <Trash2 size={14} />
+                                </button>
                               </div>
                             )}
                           </div>
                         </div>
-                      </div>
+                      </motion.div>
                     );
                   })
                 ) : (
@@ -1177,7 +1546,8 @@ export const HomePage = () => {
                 <div ref={messagesEndRef} />
               </div>
 
-              {showNewMessageIndicator && (
+              {/* Show new message indicator only if scrolled up AND there are new unread messages */}
+              {showNewMessageIndicator && currentMessages && currentMessages.length > messageCountRef.current && (
                 <button
                   className="new-message-indicator"
                   onClick={() => {
@@ -1301,8 +1671,81 @@ export const HomePage = () => {
                     </div>
                   )}
 
+                  {/* Bulk Delete Messages Section */}
+                  {isMultiSelectMode && selectedMessages.size > 0 && (
+                    <div style={{
+                      width: '100%',
+                      backgroundColor: 'var(--bg-secondary)',
+                      padding: '12px 16px',
+                      borderRadius: '8px',
+                      marginBottom: '12px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      borderLeft: '3px solid var(--accent)',
+                      gap: '12px'
+                    }}>
+                      <span style={{ color: 'var(--color-text)', fontWeight: 500 }}>
+                        {selectedMessages.size} selected
+                      </span>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          onClick={() => {
+                            setSelectedMessages(new Set());
+                            setIsMultiSelectMode(false);
+                          }}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            border: '1px solid var(--border)',
+                            background: 'var(--bg-panel)',
+                            color: 'var(--color-text)',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            fontWeight: 500
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => setMessageToDelete('__bulk__')}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            border: 'none',
+                            background: 'var(--danger)',
+                            color: '#fff',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            fontWeight: 500
+                          }}
+                        >
+                          <Trash2 size={12} style={{ marginRight: '4px', display: 'inline' }} /> Delete
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Professional 3D Bitmoji Avatar - Ready Player Me */}
+                  {/* Positioned absolutely above the input box, doesn't interfere */}
+                  <div style={{ position: 'relative', width: '100%', height: 0 }}>
+                    <div style={{
+                      position: 'absolute',
+                      bottom: '100%',
+                      left: '8px',
+                      marginBottom: '8px',
+                      pointerEvents: 'none',
+                      zIndex: 5
+                    }}>
+                      <ReadyPlayerBitmoji
+                        state={bitmojiState}
+                      />
+                    </div>
+                  </div>
+
                   <div className="chat-input-box" style={{ width: '100%' }}>
                     <input type="file" ref={fileInputRef} style={{ display: 'none' }} />
+
                     <button className="input-icon-btn" onClick={() => fileInputRef.current?.click()}><Paperclip size={16} strokeWidth={1.5} /></button>
                     <button className="input-icon-btn" onClick={() => fileInputRef.current?.click()}><Image size={16} strokeWidth={1.5} /></button>
                     <button
@@ -1321,6 +1764,18 @@ export const HomePage = () => {
                       rows={1}
                       style={{ resize: 'none', overflowY: 'auto', maxHeight: '120px' }}
                       onChange={handleTyping}
+                      onFocus={() => {
+                        setInputFocused(true);
+                        // Set walking state when focus with empty input
+                        if (messageText.trim().length === 0) {
+                          setBitmojiState('walking');
+                        }
+                      }}
+                      onBlur={() => {
+                        setInputFocused(false);
+                        // Return to idle when unfocused
+                        setBitmojiState('idle');
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault();
@@ -1353,10 +1808,10 @@ export const HomePage = () => {
                             }}
                           >
                             <EmojiPicker
-                              theme={theme === 'dark' ? Theme.DARK : Theme.LIGHT}
-                              onEmojiClick={(emojiData) => {
-                                setMessageText(prev => prev + emojiData.emoji);
+                              onEmojiSelect={(emoji) => {
+                                setMessageText(prev => prev + emoji);
                               }}
+                              onClose={() => setShowEmojiPicker(false)}
                             />
                           </motion.div>
                         )}
@@ -1557,6 +2012,18 @@ export const HomePage = () => {
         </div>
       )}
 
+      {/* AI Assistant Panel - Above Text Input */}
+      {activeChatId && aiPanelMessageId && (
+        <AIPanelBox
+          isOpen={true}
+          onClose={() => setAIPanelMessageId(null)}
+          messageId={aiPanelMessageId}
+          messageContent={currentMessages.find(m => m.id === aiPanelMessageId)?.content || ''}
+          chatId={activeChatId}
+          onReplySelect={handleAIPanelReplySelect}
+        />
+      )}
+
       {/* Translate Modal */}
       {translateMessageId && (
         <TranslateModal
@@ -1581,6 +2048,30 @@ export const HomePage = () => {
         />
       )}
 
+      {/* Emoji Picker Modal for Reactions */}
+      {showReactionEmojiPicker && reactionEmojiPickerMessageId && (
+        <EmojiPicker
+          onEmojiSelect={async (emoji) => {
+            try {
+              // Trigger scatter animation
+              triggerScatter(reactionEmojiPickerMessageId, emoji);
+
+              const { data: updated } = await api.post(`/messages/${reactionEmojiPickerMessageId}/react`, { emoji });
+              dispatch(updateMessageInStore(updated));
+              setShowReactionEmojiPicker(false);
+              setReactionEmojiPickerMessageId(null);
+            } catch (err: any) {
+              showAlert('Failed to add reaction', 'error');
+            }
+          }}
+          onClose={() => {
+            setShowReactionEmojiPicker(false);
+            setReactionEmojiPickerMessageId(null);
+          }}
+          position={reactionEmojiPickerPosition}
+        />
+      )}
+
       {/* Delete Chat Confirm Modal */}
       {chatToDelete && (
         <div className="modal-overlay">
@@ -1593,13 +2084,31 @@ export const HomePage = () => {
               <button className="btn-secondary" onClick={() => setChatToDelete(null)}>Cancel</button>
               <button className="btn-primary" style={{ background: 'var(--danger)' }} onClick={async () => {
                 try {
+                  setIsClearingChat(true);
+
+                  // Instantly clear messages from UI (optimistic update)
+                  const messagesInChat = currentMessages || [];
+                  messagesInChat.forEach(msg => {
+                    dispatch(deleteMessageInStore({ chatId: chatToDelete!, messageId: msg.id }));
+                  });
+
+                  // Show toast
+                  showToast(`Chat cleared! ${messagesInChat.length} message${messagesInChat.length !== 1 ? 's' : ''} deleted.`, 1500);
+
+                  // Call API
                   await api.put(`/chats/${chatToDelete}/hide`);
                   dispatch(fetchChats() as any);
+
                   setChatToDelete(null);
+                  setIsClearingChat(false);
                 } catch (err) {
-                  console.error('Failed to hide chat', err);
+                  setIsClearingChat(false);
+                  console.error('Failed to clear chat', err);
+                  showToast('Failed to clear chat');
                 }
-              }}>Clear</button>
+              }} disabled={isClearingChat}>
+                {isClearingChat ? 'Clearing...' : 'Clear'}
+              </button>
             </div>
           </div>
         </div>
@@ -1617,11 +2126,72 @@ export const HomePage = () => {
             width: '90%',
             boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
           }}>
-            <p style={{ margin: '0 0 16px', fontSize: '14px', color: 'var(--color-text)', fontWeight: 500 }}>Delete this message for everyone?</p>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button className="btn-secondary" style={{ padding: '7px 14px', fontSize: '13px' }} onClick={() => setMessageToDelete(null)}>Cancel</button>
-              <button className="btn-primary" style={{ padding: '7px 14px', fontSize: '13px', background: 'var(--danger)' }} onClick={confirmDeleteMessage}>Delete</button>
-            </div>
+            {/* Show options for outgoing messages if deleteOption is null */}
+            {deleteOption === null && messageToDelete !== '__bulk__' ? (
+              <>
+                <p style={{ margin: '0 0 16px', fontSize: '14px', color: 'var(--color-text)', fontWeight: 500 }}>
+                  Delete options:
+                </p>
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                  <button 
+                    className="btn-secondary" 
+                    style={{ padding: '7px 14px', fontSize: '13px' }} 
+                    onClick={() => setMessageToDelete(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    className="btn-primary" 
+                    style={{ padding: '7px 14px', fontSize: '13px', background: 'var(--text-secondary)' }} 
+                    onClick={() => confirmDeleteMessage('me')}
+                  >
+                    Delete for Me
+                  </button>
+                  <button 
+                    className="btn-primary" 
+                    style={{ padding: '7px 14px', fontSize: '13px', background: 'var(--danger)' }} 
+                    onClick={() => confirmDeleteMessage('everyone')}
+                  >
+                    Delete for Everyone
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p style={{ margin: '0 0 16px', fontSize: '14px', color: 'var(--color-text)', fontWeight: 500 }}>
+                  {messageToDelete === '__bulk__' 
+                    ? `Delete ${selectedMessages.size} message${selectedMessages.size !== 1 ? 's' : ''}?` 
+                    : 'Delete this message?'}
+                </p>
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                  <button 
+                    className="btn-secondary" 
+                    style={{ padding: '7px 14px', fontSize: '13px' }} 
+                    onClick={() => {
+                      setMessageToDelete(null);
+                      setDeleteOption(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    className="btn-primary" 
+                    style={{ padding: '7px 14px', fontSize: '13px', background: 'var(--danger)' }} 
+                    onClick={() => {
+                      if (messageToDelete === '__bulk__') {
+                        handleDeleteSelectedMessages();
+                      } else {
+                        confirmDeleteMessage(deleteOption || 'me');
+                      }
+                      setMessageToDelete(null);
+                      setDeleteOption(null);
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1718,6 +2288,12 @@ export const HomePage = () => {
           </>
         );
       })()}
+
+      {/* Emoji Scatter Animations */}
+      {renderEmojiAnimations()}
+
+      {/* Friend Celebration Animations */}
+      {renderCelebrations()}
     </div>
   );
 };

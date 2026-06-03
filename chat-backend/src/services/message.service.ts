@@ -216,6 +216,7 @@ export class MessageService {
   async toggleReaction(userId: string, messageId: string, emoji: string) {
     const msg = await this.messageRepository.getMessageById(messageId);
     if (!msg) throw new Error('Message not found');
+    // Service handles single emoji per user: toggle/replace logic is in repository
     return this.messageRepository.toggleReaction(messageId, userId, emoji);
   }
 

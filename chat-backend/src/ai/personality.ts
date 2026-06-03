@@ -88,6 +88,35 @@ const PERSONALITY_BASES: Record<PersonalityType, string> = {
   CUSTOM: `Use the custom instructions provided to shape your personality and response style.`,
 };
 
+// ── CARING WORDS FILTER ──
+// Restrict overly affectionate Tamil/Tanglish terms that don't fit professional tone
+const RESTRICTED_CARING_WORDS_TAMIL = [
+  'thangam', 'thangachi', 'thangapan',
+  'chellam', 'chellamey', 'chellakutty',
+  'baby', 'kanna', 'kannu', 'kannukili',
+  'paiyan', 'paiya', 'paiyakkili',
+  'rasa', 'rasakkili', 'rasam',
+  'makan', 'makali', 'makaley',
+  'annan', 'anna', 'annakka',
+  'akka', 'akkakka', 'akkai',
+  'ammu', 'ammuku', 'ammali',
+  'kutty', 'kuttikku', 'kutalam',
+  'mole', 'moley', 'molakka',
+  'pilli', 'pillai', 'pillaikku',
+  'thamarai', 'thamaraikku',
+  'kulanthai', 'kulandhaikku',
+  'marumagan', 'marumakhal',
+  'vaalibar', 'vaalibarkku',
+];
+
+const RESTRICTED_CARING_WORDS_ENGLISH = [
+  'baby', 'babe', 'hun', 'honey', 'sweetheart', 'darling',
+  'dear', 'dearest', 'love', 'my love', 'gorgeous',
+  'beautiful', 'handsome', 'cutie', 'sweetie', 'angel',
+  'precious', 'treasure', 'cupcake', 'pumpkin', 'buttercup',
+  'sweetness', 'sunshine', 'moonlight', 'star', 'starbaby',
+];
+
 export interface PersonalityContext {
   personality: PersonalityType;
   customPrompt?: string;
@@ -255,4 +284,54 @@ export function calculateTypingDelay(replyLength: number): number {
   const typingMs = (wordCount / 40) * 60000;
   const total = readingDelay + typingMs;
   return Math.min(Math.max(total, 2000), 12000);
+}
+
+/**
+ * Filter out overly caring/affectionate words based on personality type
+ * For PROFESSIONAL mode: Remove all caring words
+ * For FRIENDLY/CASUAL: Allow some caring words but limit usage
+ */
+export function filterCaringWords(
+  response: string,
+  personality: PersonalityType,
+  variant: string
+): string {
+  if (personality === 'PROFESSIONAL' || personality === 'CORPORATE') {
+    // Remove ALL caring words for professional tone
+    let filtered = response;
+    
+    const words = variant === 'TAMIL' ? RESTRICTED_CARING_WORDS_TAMIL : RESTRICTED_CARING_WORDS_ENGLISH;
+    
+    words.forEach((word) => {
+      const regex = new RegExp(`\\b${word}\\b`, 'gi');
+      filtered = filtered.replace(regex, '');
+    });
+    
+    // Clean up extra spaces
+    filtered = filtered.replace(/\s+/g, ' ').trim();
+    return filtered;
+  }
+  
+  if (personality === 'CASUAL' || personality === 'FRIENDLY') {
+    // Limit caring words to max 1-2 per response
+    let filtered = response;
+    const words = variant === 'TAMIL' ? RESTRICTED_CARING_WORDS_TAMIL : RESTRICTED_CARING_WORDS_ENGLISH;
+    
+    let caringWordCount = 0;
+    const maxCaring = 2;
+    
+    words.forEach((word) => {
+      const regex = new RegExp(`\\b${word}\\b`, 'gi');
+      filtered = filtered.replace(regex, (match) => {
+        caringWordCount++;
+        return caringWordCount <= maxCaring ? match : '';
+      });
+    });
+    
+    filtered = filtered.replace(/\s+/g, ' ').trim();
+    return filtered;
+  }
+  
+  // For other personalities, keep response as-is
+  return response;
 }

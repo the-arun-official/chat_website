@@ -25,24 +25,84 @@
   background-color: var(--bg-surface);
   border-bottom: 1px solid var(--border);
   z-index: 50;
+  position: relative;
+  overflow: hidden;
+  gap: 8px;
+}
+
+/* Aurora Header Background - Animated Northern Lights */
+.v2-navbar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 200%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(0, 255, 150, 0.15), transparent);
+  filter: blur(20px);
+  animation: aurora-slide-left 8s infinite ease-in-out;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.v2-navbar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -100%;
+  width: 200%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(138, 43, 226, 0.1), transparent);
+  filter: blur(25px);
+  animation: aurora-slide-right 10s infinite ease-in-out;
+  pointer-events: none;
+  z-index: 0;
+  animation-delay: 1s;
+}
+
+/* Make navbar content appear above aurora */
+.nav-left, .nav-center, .nav-right {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+@keyframes aurora-slide-left {
+  0%, 100% {
+    left: -100%;
+  }
+  50% {
+    left: 100%;
+  }
+}
+
+@keyframes aurora-slide-right {
+  0%, 100% {
+    right: -100%;
+  }
+  50% {
+    right: 100%;
+  }
 }
 
 .nav-left {
-  display: flex;
-  align-items: center;
   gap: 12px;
-  min-width: 220px;
+  flex-shrink: 0;
 }
 
 .nav-icon-btn {
   width: 28px;
   height: 28px;
+  min-width: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-secondary);
   border-radius: var(--radius-sm);
   transition: all 0.2s;
+  flex-shrink: 0;
 }
 
 .nav-icon-btn:hover {
@@ -54,18 +114,24 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  flex-shrink: 0;
 }
 
 .nav-title {
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .nav-status-indicator {
   width: 8px;
   height: 8px;
+  min-width: 8px;
   border-radius: 50%;
   background-color: var(--text-tertiary);
+  flex-shrink: 0;
 }
 
 .nav-status-indicator.online {
@@ -76,6 +142,7 @@
   flex: 1;
   display: flex;
   justify-content: center;
+  min-width: 0;
 }
 
 .nav-search {
@@ -87,6 +154,7 @@
   width: 100%;
   max-width: 400px;
   height: 28px;
+  min-width: 0;
 }
 
 .nav-search input {
@@ -96,6 +164,7 @@
   padding-left: 8px;
   color: var(--text-primary);
   outline: none;
+  min-width: 0;
 }
 
 .nav-search input::placeholder {
@@ -105,14 +174,39 @@
 .nav-right {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-width: 220px;
+  gap: 8px;
   justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.nav-user-profile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+  transition: background-color 0.2s;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.nav-user-profile:hover {
+  background-color: var(--surface-hover);
+}
+
+.nav-user-profile span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
 }
 
 .nav-avatar {
   width: 28px;
   height: 28px;
+  min-width: 28px;
   border-radius: 14px;
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
   color: var(--accent-text);
@@ -122,6 +216,8 @@
   font-weight: 600;
   font-size: 11px;
   cursor: pointer;
+  flex-shrink: 0;
+  overflow: hidden;
 }
 
 /* ── MAIN LAYOUT ── */
@@ -232,20 +328,21 @@
 }
 
 .subitem-avatar {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
   background-color: var(--accent);
   color: var(--accent-text);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 600;
+  flex-shrink: 0;
 }
 
 .subitem-name {
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -257,6 +354,7 @@
   justify-content: space-between;
   flex: 1;
   overflow: hidden;
+  gap: 10px;
 }
 
 .subitem-badge {
@@ -556,6 +654,7 @@
   gap: 12px;
   max-width: 85%;
   min-width: min-content;
+  word-wrap: break-word;
 }
 
 .message-row.incoming {
@@ -596,9 +695,12 @@
   line-height: 1.45;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
   overflow-wrap: break-word;
-  word-break: normal;
+  word-break: break-word;
   white-space: pre-wrap;
   min-width: 40px;
+  max-width: 100%;
+  word-spacing: normal;
+  hyphens: auto;
 }
 
 .incoming .bubble {
@@ -968,7 +1070,44 @@
   display: none;
 }
 
+/* Tablet view (768px and below) */
+@media screen and (max-width: 1024px) {
+  .chat-feed {
+    padding: 16px 12px;
+    gap: 12px;
+  }
+  
+  .message-row {
+    max-width: 95%;
+  }
+  
+  .bubble {
+    max-width: 95%;
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
+}
+
+/* Tablet portrait (768px and below) */
 @media screen and (max-width: 768px) {
+  .chat-feed {
+    padding: 12px 8px;
+    gap: 10px;
+  }
+  
+  .message-row {
+    max-width: 100%;
+  }
+  
+  .bubble {
+    max-width: 90%;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    word-spacing: normal;
+    white-space: pre-wrap;
+    font-size: 14px;
+  }
+
   .v2-main-layout {
     position: relative;
     width: 100%;
@@ -1036,6 +1175,178 @@
   .mobile-back-btn:hover {
     background-color: var(--surface-hover);
   }
+}
+
+/* Small phones (480px and below) */
+@media screen and (max-width: 480px) {
+  .v2-navbar {
+    padding: 0 12px;
+    gap: 6px;
+    height: 40px;
+    min-height: 40px;
+  }
+
+  .nav-left {
+    gap: 8px;
+  }
+
+  .nav-icon-btn {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+  }
+
+  .nav-user-profile {
+    gap: 6px;
+    padding: 4px 6px;
+    max-width: 100px;
+  }
+
+  .nav-user-profile span {
+    max-width: 70px;
+    font-size: 11px;
+  }
+
+  .nav-avatar {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    font-size: 10px;
+  }
+
+  .nav-right {
+    gap: 4px;
+  }
+
+  .chat-header {
+    height: 48px;
+    min-height: 48px;
+    padding: 0 12px;
+  }
+
+  .chat-header-left {
+    gap: 8px;
+  }
+
+  .chat-header-avatar {
+    width: 28px;
+    height: 28px;
+  }
+
+  .chat-name-row h2 {
+    font-size: 13px;
+  }
+
+  .chat-status-row {
+    font-size: 10px;
+  }
+
+  .chat-header-right {
+    gap: 4px;
+  }
+
+  .header-action-btn {
+    width: 24px;
+    height: 24px;
+  }
+
+  .message-row {
+    max-width: 100%;
+  }
+  
+  .bubble {
+    max-width: 95%;
+    font-size: 13px;
+    padding: 7px 10px;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    word-spacing: normal;
+    white-space: pre-wrap;
+    line-height: 1.4;
+  }
+  
+  .message-meta {
+    font-size: 9px;
+    gap: 3px;
+  }
+
+  .chat-input-box {
+    padding: 6px 10px;
+    gap: 6px;
+  }
+
+  .chat-text-input {
+    font-size: 13px;
+  }
+
+  .send-btn {
+    width: 24px;
+    height: 24px;
+  }
+
+  .options-dropdown {
+    width: 160px;
+    right: -10px;
+  }
+
+  .options-dropdown button {
+    font-size: 12px;
+    padding: 6px;
+  }
+}
+
+/* Extra small phones (360px and below) */
+@media screen and (max-width: 360px) {
+  .v2-navbar {
+    padding: 0 8px;
+    gap: 4px;
+  }
+
+  .nav-left {
+    gap: 4px;
+  }
+
+  .nav-icon-btn {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+  }
+
+  .nav-title {
+    font-size: 12px;
+  }
+
+  .nav-user-profile {
+    gap: 4px;
+    padding: 2px 4px;
+    max-width: 80px;
+  }
+
+  .nav-user-profile span {
+    max-width: 50px;
+    font-size: 10px;
+  }
+
+  .nav-avatar {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    font-size: 9px;
+  }
+
+  .chat-header-avatar {
+    width: 24px;
+    height: 24px;
+  }
+
+  .chat-name-row h2 {
+    font-size: 12px;
+  }
+
+  .chat-header-info {
+    gap: 1px;
+  }
+}
 }
 
 .group-hover-trigger .chat-hover-actions {

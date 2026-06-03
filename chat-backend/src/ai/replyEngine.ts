@@ -1,7 +1,7 @@
 // src/ai/replyEngine.ts
 // Generates AI replies using multi-provider fallback system.
 
-import { buildSystemPrompt, PersonalityContext, calculateTypingDelay } from './personality';
+import { buildSystemPrompt, PersonalityContext, calculateTypingDelay, filterCaringWords } from './personality';
 import { classifyMessage, ClassificationResult } from './classifier';
 import { getUserStyle, getContactMemory, getOrBuildSummary } from './memory';
 import { prisma } from '../config/prisma';
@@ -11,6 +11,7 @@ import {
   detectLanguageVariant,
   buildLanguagePrompt,
   validateLanguageMatch,
+  removeLanguageNegotiation,
 } from './languageDetector';
 
 let providerManager = createProviderManager();
@@ -148,6 +149,12 @@ export async function generateReply(input: ReplyEngineInput): Promise<ReplyEngin
     ]);
 
     draftReply = result.reply;
+
+    // Remove any language negotiation phrases
+    draftReply = removeLanguageNegotiation(draftReply);
+
+    // Apply caring words filter based on personality
+    draftReply = filterCaringWords(draftReply, input.personality, languageDetection.variant);
 
     if (!draftReply) {
       draftReply = "Thanks for your message! I'll get back to you soon.";

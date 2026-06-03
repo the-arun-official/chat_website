@@ -104,7 +104,10 @@ You MUST respond ENTIRELY IN TAMIL SCRIPT.
 Do NOT mix Tamil with English.
 Do NOT romanize Tamil.
 Use proper Tamil grammar and vocabulary.
-Match their formality level and tone.`;
+Match their formality level and tone.
+DO NOT ask them to switch to English.
+DO NOT apologize or negotiate about language.
+Just respond naturally in Tamil.`;
   }
 
   if (detection.variant === 'TANGLISH') {
@@ -116,8 +119,10 @@ You MUST respond in TANGLISH with the SAME style:
 - Use Tamil words written in English characters (da, di, la, ve, va, etc.)
 - Mix English and Tanglish naturally
 - Use particles like "da", "le", "va" at the end of sentences as they do
-- If they use "mapla/thangam", use similar affectionate terms back
 - Keep the same casual, friendly vibe
+- DO NOT ask them to switch to English
+- DO NOT apologize for using Tanglish
+- Accept their language choice naturally and respond in it
 Match their exact tone and word patterns.`;
   }
 
@@ -129,13 +134,77 @@ You MUST respond in the SAME MIX:
 - Use both Tamil script and English together
 - Match their ratio of Tamil vs English
 - Keep sentences in their original structure
-- Do not translate, just adapt your response`;
+- DO NOT translate or correct their language
+- Respond naturally in their mixed language`;
   }
 
   return `
 === LANGUAGE REQUIREMENT ===
 The user sent a message in ENGLISH.
 Respond naturally in ENGLISH only.`;
+}
+
+/**
+ * CRITICAL: Never negotiate language choice in response
+ * Remove ALL phrases that ask user to switch languages
+ * These violate user autonomy and sound robotic
+ */
+export function removeLanguageNegotiation(response: string): string {
+  const negotiationPatterns = [
+    // "let's stick to English" variants
+    /as we\s+(previously\s+)?discussed.*let['']?s\s+stick\s+to\s+(english|hindi)/gi,
+    /let['']?s\s+stick\s+to\s+(english|hindi)/gi,
+    /let['']?s\s+continue\s+(in\s+)?(english|hindi)/gi,
+    
+    // "I prefer English" variants
+    /i['']?d\s+prefer\s+(english|hindi)/gi,
+    /i\s+prefer\s+(english|hindi)/gi,
+    /i['']?m\s+more\s+comfortable\s+in\s+(english|hindi)/gi,
+    /i\s+am\s+more\s+comfortable\s+in\s+(english|hindi)/gi,
+    
+    // "Can we use English" variants
+    /can we\s+(please\s+)?use\s+(english|hindi)/gi,
+    /can we\s+(please\s+)?communicate\s+in\s+(english|hindi)/gi,
+    /let['']?s\s+communicate\s+in\s+(english|hindi)/gi,
+    /please\s+switch\s+to\s+(english|hindi)/gi,
+    
+    // "I don't understand" variants
+    /i\s+don['']?t\s+understand\s+(tanglish|tamil|hindi)/gi,
+    /i\s+don['']?t\s+speak\s+(tanglish|tamil|hindi)/gi,
+    /i\s+cannot\s+respond\s+in\s+(tanglish|tamil|hindi)/gi,
+    /i\s+am\s+not\s+equipped\s+to\s+respond\s+in\s+(tanglish|tamil|hindi)/gi,
+    
+    // "Not equipped" variants
+    /i['']?m\s+not\s+equipped\s+to\s+(respond\s+)?in\s+(tanglish|tamil|hindi)/gi,
+    /i\s+respectfully\s+point\s+out/gi,
+    /while\s+i\s+appreciate\s+your\s+preference/gi,
+    /originally\s+planned/gi,
+    /to\s+avoid\s+any\s+potential\s+misunderstandings/gi,
+    
+    // Full sentence removals
+    /i\s+apologize.*but\s+i\s+must\s+respectfully.*(?=\s|$)/gi,
+    /thank you for your understanding and cooperation\./gi,
+    /this will enable us to communicate more effectively/gi,
+    
+    // Paragraph-level removals
+    /i\s+apologize[\s\S]*?cooperation\./gi,
+  ];
+
+  let filtered = response;
+  
+  negotiationPatterns.forEach((pattern) => {
+    filtered = filtered.replace(pattern, '');
+  });
+
+  // Clean up resulting gaps, multiple spaces, and odd line breaks
+  filtered = filtered
+    .replace(/\n\s*\n/g, '\n')           // Remove blank lines
+    .replace(/\s+\n/g, '\n')             // Remove trailing spaces before newlines
+    .replace(/\n\s+/g, '\n')             // Remove leading spaces after newlines
+    .replace(/\s+/g, ' ')                // Replace multiple spaces with single space
+    .trim();
+  
+  return filtered;
 }
 
 export function analyzeLanguagePattern(

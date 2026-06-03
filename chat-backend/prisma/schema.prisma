@@ -74,6 +74,8 @@ model User {
   autoMessengerConfigs AutoMessengerConfig[]
   autoReplyRules       AutoReplyRule[]
   userAIProfile    UserAIProfile?
+  pendingChatReply PendingChatReply?
+  dailyStatus      DailyStatus?
   contactMemoriesOwned ContactMemory[] @relation("ContactMemoryOwner")
   contactMemoriesAbout ContactMemory[] @relation("ContactMemoryAbout")
 
@@ -197,7 +199,7 @@ model Reaction {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
-  @@unique([messageId, userId, emoji]) // A user can't add the same emoji twice to a message
+  @@unique([messageId, userId]) // A user can only have ONE emoji reaction per message
   @@index([messageId])
 }
 
@@ -337,6 +339,7 @@ model AutoMessengerConfig {
   sleepStart      String?
   sleepEnd        String?
   timezone        String            @default("Asia/Kolkata")
+  vipContacts     Json?             // JSON array of usernames ["user1", "user2"]
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
@@ -353,8 +356,31 @@ model UserAIProfile {
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   styleFingerprint Json     @default("{}")
   lastLearnedAt    DateTime?
+  aiProfileSetup   Boolean  @default(false)  // Tracks if owner profile (name, age, occupation) was set up
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+}
+
+// ── NEW: Pending Chat Reply (auto-reply for first-time contacts) ──
+model PendingChatReply {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   String   @default("Hey! 👋 Thanks for reaching out. The boss will get back to you soon!")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ── NEW: Daily Status (status for today, resets at midnight) ──
+model DailyStatus {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text      String?  // e.g., "on leave", "in meeting", empty if not set
+  timezone  String   @default("Asia/Kolkata")
+  date      DateTime // Date when status was set
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model ContactMemory {
